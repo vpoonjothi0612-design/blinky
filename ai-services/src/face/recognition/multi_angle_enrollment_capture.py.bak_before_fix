@@ -1,0 +1,533 @@
+"""Interactive Multi-Angle Face Enrollment Capture Tool.
+
+Guides the operator to capture real webcam photos across all target angles for any employee:
+1. Frontal (front)
+2. 15° Left (15_left)
+3. 30° Left (30_left)
+4. 45° Left (45_left)
+5. 15° Right (15_right)
+6. 30° Right (30_right)
+7. 45° Right (45_right)
+8. Slightly Up (slightly_up)
+9. Slightly Down (slightly_down)
+
+Features:
+1. Dynamic Employee ID and Name support (--employee EMP002 --name "Employee 2").
+2. Saves strictly to data/enrollment/<employeeId>/ with continuous numbering.
+3. Graceful handling of Ctrl+C (KeyboardInterrupt), Q, ESC, and camera read failure without secondary crashes.
+4. Preserves all captured images upon interruption and compiles multi-view reference only if images exist.
+5. Quality-gated capture with real-time HUD telemetry.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+import time
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
+
+import cv2
+import numpy as np
+from insightface.model_zoo import get_model
+
+# -----------------------------------------------------------------------------
+# Path Configurations
+# -----------------------------------------------------------------------------
+
+AI_SERVICES_DIR = Path(__file__).resolve().parents[3]
+
+sys.path.append(str(AI_SERVICES_DIR / "src" / "face"))
+sys.path.append(str(AI_SERVICES_DIR / "src" / "face" / "recognition"))
+
+try:
+    from face_preprocess import preprocess_face
+except ImportError:
+    from src.face.recognition.face_preprocess import preprocess_face
+
+from employee_registry import (
+    validate_employee_id,
+    load_registry,
+    remove_employee_safely,
+)
+from multi_employee_enrollment import (
+    enroll_employee_from_directory,
+    process_enrollment_image,
+    MIN_FACE_DIM,
+    MIN_BRIGHTNESS,
+    MAX_BRIGHTNESS,
+    MIN_SHARPNESS,
+)
+
+from face_config import (
+    YUNET_MODEL_PATH,
+    ARCFACE_MODEL_PATH,
+    ENROLLMENT_BASE_DIR,
+)
+
+# Target Angles to Capture
+TARGET_ANGLES = [
+    {
+        "code": "front",
+        "title": "Frontal (Center)",
+        "guide": "Look straight at the camera directly.",
+    },
+    {
+        "code": "15_left",
+        "title": "15 deg Left",
+        "guide": "Turn your head slightly to your LEFT (~15 deg).",
+    },
+    {
+        "code": "30_left",
+        "title": "30 deg Left",
+        "guide": "Turn your head moderately to your LEFT (~30 deg).",
+    },
+    {
+        "code": "45_left",
+        "title": "45 deg Left",
+        "guide": "Turn head into 3/4 profile to your LEFT (~45 deg).",
+    },
+    {
+        "code": "15_right",
+        "title": "15 deg Right",
+        "guide": "Turn your head slightly to your RIGHT (~15 deg).",
+    },
+    {
+        "code": "30_right",
+        "title": "30 deg Right",
+        "guide": "Turn your head moderately to your RIGHT (~30 deg).",
+    },
+    {
+        "code": "45_right",
+        "title": "45 deg Right",
+        "guide": "Turn head into 3/4 profile to your RIGHT (~45 deg).",
+    },
+    {
+        "code": "slightly_up",
+        "title": "Slightly Up",
+        "guide": "Tilt your chin slightly UPWARDS (~15 deg).",
+    },
+    {
+        "code": "slightly_down",
+        "title": "Slightly Down",
+        "guide": "Tilt your chin slightly DOWNWARDS (~15 deg).",
+    },
+]
+
+
+# -----------------------------------------------------------------------------
+# File Index Helper
+# -----------------------------------------------------------------------------
+
+def get_next_available_index(enroll_dir: Path, emp_id: str) -> int:
+    """Finds next index number for new photos so existing ones are never overwritten."""
+    max_idx = 0
+    pattern = re.compile(rf"{re.escape(emp_id)}_angle_(\d+)_", re.IGNORECASE)
+    for p in enroll_dir.glob("*.jpg"):
+        match = pattern.match(p.name)
+        if match:
+            idx = int(match.group(1))
+            if idx > max_idx:
+                max_idx = idx
+    return max_idx + 1
+
+
+# -----------------------------------------------------------------------------
+# Interactive Capture UI
+# -----------------------------------------------------------------------------
+
+def draw_enrollment_hud(
+    frame: np.ndarray,
+    emp_id: str,
+    current_angle: Dict[str, str],
+    angle_idx: int,
+    total_angles: int,
+    face_info: Optional[Dict[str, Any]],
+    status_message: str,
+    status_color: Tuple[int, int, int],
+) -> np.ndarray:
+    """Renders comprehensive operator HUD overlay for multi-angle photo capture."""
+    canvas = frame.copy()
+    h, w = frame.shape[:2]
+
+    # Draw Face Box & Landmarks
+    is_ready = False
+    if face_info and face_info.get("detected"):
+        bx, by, bw, bh = face_info["bbox"]
+        metrics = face_info.get("metrics", {})
+        size_ok = bw >= MIN_FACE_DIM and bh >= MIN_FACE_DIM
+        bright_ok = MIN_BRIGHTNESS <= metrics.get("brightness", 0.0) <= MAX_BRIGHTNESS
+        sharp_ok = metrics.get("sharpness", 0.0) >= MIN_SHARPNESS
+        face_count_ok = face_info.get("count", 0) == 1
+
+        is_ready = size_ok and bright_ok and sharp_ok and face_count_ok
+        box_color = (0, 220, 0) if is_ready else (0, 165, 255)
+
+        cv2.rectangle(canvas, (bx, by), (bx + bw, by + bh), box_color, 2)
+        for pt in face_info.get("landmarks", []):
+            cv2.circle(canvas, (int(pt[0]), int(pt[1])), 3, (0, 255, 255), -1)
+
+    # Top Banner: Employee & Angle Instruction
+    cv2.rectangle(canvas, (0, 0), (w, 85), (20, 20, 20), -1)
+    cv2.line(canvas, (0, 85), (w, 85), (70, 70, 70), 1)
+
+    header_str = f"ENROLLING: {emp_id}  |  STEP [{angle_idx + 1}/{total_angles}]: {current_angle['title'].upper()}"
+    cv2.putText(canvas, header_str, (20, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+    cv2.putText(canvas, current_angle["guide"], (20, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1)
+
+    # Bottom Dashboard: Telemetry & Controls
+    dash_h = 130
+    cv2.rectangle(canvas, (0, h - dash_h), (w, h), (20, 20, 20), -1)
+    cv2.line(canvas, (0, h - dash_h), (w, h - dash_h), (70, 70, 70), 1)
+
+    if face_info and face_info.get("detected"):
+        bx, by, bw, bh = face_info["bbox"]
+        metrics = face_info.get("metrics", {})
+        b_val = metrics.get("brightness", 0.0)
+        s_val = metrics.get("sharpness", 0.0)
+
+        size_color = (0, 255, 0) if (bw >= MIN_FACE_DIM and bh >= MIN_FACE_DIM) else (0, 0, 255)
+        bright_color = (0, 255, 0) if (MIN_BRIGHTNESS <= b_val <= MAX_BRIGHTNESS) else (0, 0, 255)
+        sharp_color = (0, 255, 0) if (s_val >= MIN_SHARPNESS) else (0, 0, 255)
+
+        cv2.putText(canvas, f"Size: {bw}x{bh} (Min {MIN_FACE_DIM})", (20, h - 95), cv2.FONT_HERSHEY_SIMPLEX, 0.5, size_color, 1)
+        cv2.putText(canvas, f"Brightness: {b_val:.1f} (60-200)", (200, h - 95), cv2.FONT_HERSHEY_SIMPLEX, 0.5, bright_color, 1)
+        cv2.putText(canvas, f"Sharpness: {s_val:.1f} (Min {MIN_SHARPNESS})", (430, h - 95), cv2.FONT_HERSHEY_SIMPLEX, 0.5, sharp_color, 1)
+    else:
+        cv2.putText(canvas, "No face detected in camera stream", (20, h - 95), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 1)
+
+    # Status / Notification Message
+    if status_message:
+        cv2.putText(canvas, status_message, (20, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.65, status_color, 2)
+    else:
+        ready_prompt = "READY TO CAPTURE -- Press [SPACE] or [ENTER]" if is_ready else "Adjust pose/distance to satisfy quality meters"
+        prompt_color = (0, 255, 0) if is_ready else (160, 160, 160)
+        cv2.putText(canvas, ready_prompt, (20, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, prompt_color, 1)
+
+    # Control Keys
+    controls_str = "[SPACE]: Capture  |  [S]: Skip  |  [1-9]: Step Jump  |  [Q]: Finish Session"
+    cv2.putText(canvas, controls_str, (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
+
+    return canvas
+
+
+def safe_release_camera(cap: Optional[cv2.VideoCapture]) -> None:
+    """Safely releases OpenCV video capture and closes windows without throwing secondary interrupts."""
+    if cap is not None:
+        try:
+            cap.release()
+        except Exception:
+            pass
+    try:
+        cv2.destroyAllWindows()
+    except Exception:
+        pass
+
+
+def run_interactive_enrollment_capture(
+    camera_idx: Any = 0,
+    employee_id: str = "EMP002",
+    employee_name: Optional[str] = None,
+    overwrite: bool = False,
+    append_mode: bool = False,
+):
+    """Launches guided enrollment capture session with robust camera and interrupt handling."""
+    valid, err = validate_employee_id(employee_id)
+    if not valid:
+        print(f"[Error] Invalid Employee ID: {err}")
+        sys.exit(1)
+
+    # Permanent protection for EMP001 against overwrite/deletion
+    if employee_id.upper() == "EMP001" and not append_mode:
+        print("[ERROR] EMP001 is permanently protected from deletion/overwriting. Use --append to capture and add extra angles.")
+        sys.exit(1)
+
+    emp_dir = ENROLLMENT_BASE_DIR / employee_id
+    existing_photos = list(emp_dir.glob("*.jpg")) if emp_dir.exists() else []
+    reg = load_registry()
+    is_in_registry = any(r.get("employeeId") == employee_id for r in reg)
+
+    # Duplicate / Overwrite Warning & Confirmation
+    if (is_in_registry or existing_photos) and not append_mode:
+        print("============================================================")
+        print(f"[WARNING] Employee '{employee_id}' already has existing enrollment data or registry entry!")
+        print(f"  Existing photos in folder : {len(existing_photos)}")
+        print(f"  Existing registry record  : {'YES' if is_in_registry else 'NO'}")
+        print("============================================================")
+
+        if not overwrite:
+            try:
+                confirm = input(f"Do you want to safely replace/overwrite {employee_id}'s existing data? [y/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                confirm = "n"
+
+            if confirm != "y":
+                print(f"[CANCELLED] Enrollment aborted by operator. Existing data for {employee_id} remains untouched.\n")
+                sys.exit(0)
+
+        print(f"[INFO] Removing previous test/dummy enrollment data for {employee_id}...")
+        remove_employee_safely(employee_id, clean_enrollment=True)
+    elif append_mode and existing_photos:
+        print(f"[INFO] Append mode active: Preserving {len(existing_photos)} existing photos and appending new angle observations.")
+        emp_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[SUCCESS] Cleaned existing {employee_id} data. Ready for new enrollment.\n")
+    else:
+        emp_dir.mkdir(parents=True, exist_ok=True)
+
+    print("========================================")
+    print(f"MULTI-ANGLE FACE ENROLLMENT: {employee_id}")
+    print("========================================")
+    print(f"Employee ID        : {employee_id}")
+    print(f"Employee Name      : {employee_name or f'Employee {employee_id}'}")
+    print(f"Camera Index       : {camera_idx}")
+    print(f"Destination Folder : {emp_dir}\n")
+    print("Required Angles to Capture:")
+    for i, a in enumerate(TARGET_ANGLES, start=1):
+        print(f"  {i}. {a['title']:<20} ({a['guide']})")
+    print("\nControls:")
+    print("  [SPACE] / [ENTER] : Capture photo for current angle")
+    print("  [S] / [N]         : Skip to next angle")
+    print("  [1] - [9]         : Jump directly to specific angle step")
+    print("  [Q] / [ESC]       : Finish session and compile reference embedding\n")
+
+    # Load Detection and Feature Models
+    print("Loading models...")
+    detector = cv2.FaceDetectorYN.create(
+        str(YUNET_MODEL_PATH),
+        "",
+        (640, 480),
+        0.6,
+        0.3,
+        5000,
+    )
+    arcface = get_model(str(ARCFACE_MODEL_PATH), providers=["CPUExecutionProvider"])
+    arcface.prepare(ctx_id=0)
+    # Initialize Camera (CP PLUS CameraWorker, RTSP, or local webcam)
+    camera_worker = None
+    cap = None
+    cam_str = str(camera_idx).strip()
+
+    if cam_str.upper() in ("CAM-01", "CAM-02", "1", "2"):
+        from camera_config import get_camera_config
+        from camera_worker import CameraWorker
+        cfg = get_camera_config(cam_str.upper())
+        print(f"Connecting to CP PLUS camera {cfg.camera_id} ({cfg.ip_address})...")
+        camera_worker = CameraWorker(config=cfg, auto_start=True)
+    elif cam_str.startswith("rtsp://") or cam_str.startswith("rtsps://"):
+        from camera_worker import CameraWorker
+        camera_worker = CameraWorker(config=cam_str, camera_id="RTSP-CAM", auto_start=True)
+    else:
+        dev_idx = int(cam_str) if cam_str.isdigit() else 0
+        cap = cv2.VideoCapture(dev_idx, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(dev_idx)
+        if not cap.isOpened():
+            print(f"[Error] Could not open camera {camera_idx}.")
+            sys.exit(1)
+
+    current_angle_idx = 0
+    total_angles = len(TARGET_ANGLES)
+    status_message = ""
+    status_color = (0, 255, 0)
+    status_timer = 0.0
+
+    captured_this_session = []
+    interrupted_by_user = False
+
+    try:
+        while True:
+            if camera_worker is not None:
+                has_f, frame, _, _ = camera_worker.get_latest_frame()
+                if not has_f or frame is None:
+                    time.sleep(0.02)
+                    continue
+            else:
+                try:
+                    ret, frame = cap.read()
+                except KeyboardInterrupt:
+                    interrupted_by_user = True
+                    break
+
+                if not ret or frame is None:
+                    # Camera read failure
+                    time.sleep(0.05)
+                    continue
+
+            h, w = frame.shape[:2]
+            detector.setInputSize((w, h))
+
+            # Detect Face
+            _, faces = detector.detect(frame)
+            face_info = None
+
+            if faces is not None and len(faces) > 0:
+                face = faces[0]
+                bx, by, bw, bh = map(int, face[0:4])
+                landmarks = face[4:14].reshape(5, 2)
+                x1, y1 = max(0, bx), max(0, by)
+                x2, y2 = min(w, bx + bw), min(h, by + bh)
+                face_crop = frame[y1:y2, x1:x2]
+
+                gray_crop = (
+                    cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+                    if face_crop.size > 0
+                    else np.zeros((10, 10), dtype=np.uint8)
+                )
+                brightness = float(gray_crop.mean())
+                sharpness = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
+
+                face_info = {
+                    "detected": True,
+                    "count": len(faces),
+                    "bbox": (bx, by, bw, bh),
+                    "landmarks": landmarks,
+                    "metrics": {
+                        "brightness": brightness,
+                        "sharpness": sharpness,
+                    },
+                }
+
+            # Clear temporary status message after 2.0s
+            if status_message and (time.time() - status_timer > 2.0):
+                status_message = ""
+
+            hud_frame = draw_enrollment_hud(
+                frame,
+                employee_id,
+                TARGET_ANGLES[current_angle_idx],
+                current_angle_idx,
+                total_angles,
+                face_info,
+                status_message,
+                status_color,
+            )
+
+            cv2.imshow(f"Multi-Angle Face Enrollment - {employee_id}", hud_frame)
+
+            try:
+                key = cv2.waitKey(1) & 0xFF
+            except KeyboardInterrupt:
+                interrupted_by_user = True
+                break
+
+            # Key Handling
+            if key in (ord("q"), ord("Q"), 27):
+                break
+            elif key in (ord("s"), ord("S"), ord("n"), ord("N")):
+                current_angle_idx = (current_angle_idx + 1) % total_angles
+                status_message = f"Switched to: {TARGET_ANGLES[current_angle_idx]['title']}"
+                status_color = (0, 255, 255)
+                status_timer = time.time()
+            elif ord("1") <= key <= ord("9"):
+                target_idx = key - ord("1")
+                if target_idx < total_angles:
+                    current_angle_idx = target_idx
+                    status_message = f"Jumped to step {target_idx + 1}: {TARGET_ANGLES[current_angle_idx]['title']}"
+                    status_color = (0, 255, 255)
+                    status_timer = time.time()
+            elif key in (32, 13):  # SPACE or ENTER to capture
+                curr_angle = TARGET_ANGLES[current_angle_idx]
+                if not face_info or not face_info["detected"]:
+                    status_message = "CAPTURE REJECTED: No face detected!"
+                    status_color = (0, 0, 255)
+                    status_timer = time.time()
+                    continue
+
+                if face_info["count"] != 1:
+                    status_message = f"CAPTURE REJECTED: {face_info['count']} faces found (require 1)"
+                    status_color = (0, 0, 255)
+                    status_timer = time.time()
+                    continue
+
+                # Run exact pipeline verification on captured frame
+                temp_filename = f"temp_check_{curr_angle['code']}.jpg"
+                temp_path = emp_dir / temp_filename
+                cv2.imwrite(str(temp_path), frame)
+
+                valid, emb, meta = process_enrollment_image(temp_path, detector, arcface)
+                if temp_path.exists():
+                    temp_path.unlink()
+
+                if valid and emb is not None:
+                    # Save with next continuous index
+                    next_idx = get_next_available_index(emp_dir, employee_id)
+                    save_name = f"{employee_id}_angle_{next_idx:02d}_{curr_angle['code']}.jpg"
+                    save_path = emp_dir / save_name
+                    cv2.imwrite(str(save_path), frame)
+
+                    captured_this_session.append(save_name)
+                    status_message = f"SUCCESS: Saved {save_name}!"
+                    status_color = (0, 255, 0)
+                    status_timer = time.time()
+                    print(f"[CAPTURED] Step {current_angle_idx + 1} ({curr_angle['title']}) -> Saved to: {save_path.name}")
+
+                    # Automatically advance to next angle
+                    current_angle_idx = (current_angle_idx + 1) % total_angles
+                else:
+                    status_message = f"CAPTURE REJECTED: {meta.get('reason', 'Quality check failed')}"
+                    status_color = (0, 0, 255)
+                    status_timer = time.time()
+                    print(f"[REJECTED] {curr_angle['title']}: {meta.get('reason')}")
+
+    except KeyboardInterrupt:
+        interrupted_by_user = True
+    finally:
+        # Task 3: Graceful cleanup without secondary KeyboardInterrupt
+        if camera_worker is not None:
+            camera_worker.stop()
+        if cap is not None:
+            safe_release_camera(cap)
+
+    print()
+    if interrupted_by_user:
+        print("[STOPPED] Enrollment interrupted by user.")
+    else:
+        print("[FINISHED] Enrollment session closed by user.")
+
+    print("[INFO] Camera released.")
+
+    # Check total available images in directory
+    existing_images = list(emp_dir.glob("*.jpg")) + list(emp_dir.glob("*.png"))
+    total_existing = len(existing_images)
+
+    print(f"[INFO] Existing captured images were preserved ({total_existing} photo(s) in {emp_dir}).")
+    if captured_this_session:
+        print(f"[INFO] {len(captured_this_session)} new photo(s) captured in this session ({len(captured_this_session)}/{total_angles} angles).")
+
+    # Task 3: Do not pretend all 9 were captured if interrupted early
+    if total_existing > 0:
+        print(f"\n[INFO] Enrollment compilation was completed only because {total_existing} valid image(s) exist.")
+        try:
+            enroll_employee_from_directory(
+                employee_id=employee_id,
+                employee_name=employee_name,
+                custom_dir=emp_dir,
+            )
+        except Exception as ex:
+            print(f"[Warning] Multi-view reference compilation error: {ex}")
+    else:
+        print(f"[INFO] No photos exist in {emp_dir}. Enrollment compilation skipped.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Multi-Angle Face Enrollment Capture Tool")
+    parser.add_argument("--camera", type=str, default="0", help="Camera: 'CAM-01', 'CAM-02', RTSP URL, or index (default: '0')")
+    parser.add_argument("--employee", type=str, default="EMP002", help="Target Employee ID (default: EMP002)")
+    parser.add_argument("--name", type=str, default=None, help="Target Employee Name (e.g. 'Employee 2')")
+    parser.add_argument("--overwrite", action="store_true", help="Force overwrite of existing employee enrollment data")
+    parser.add_argument("--append", action="store_true", help="Append new angles to existing employee directory without deleting existing files")
+    args = parser.parse_args()
+
+    run_interactive_enrollment_capture(
+        camera_idx=args.camera,
+        employee_id=args.employee,
+        employee_name=args.name,
+        overwrite=args.overwrite,
+        append_mode=args.append,
+    )
+
+
+if __name__ == "__main__":
+    main()

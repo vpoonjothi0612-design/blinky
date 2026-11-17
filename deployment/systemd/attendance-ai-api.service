@@ -1,0 +1,23 @@
+[Unit]
+Description=Production AI API Service (FastAPI / Uvicorn)
+Documentation=https://github.com/sanjay-dev12/Att-face-recogintion
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=attendance
+Group=attendance
+WorkingDirectory=/opt/attendance/ai-services
+EnvironmentFile=/opt/attendance/ai-services/.env
+ExecStart=/opt/attendance/ai-services/.venv/bin/uvicorn src.vehicle.vehicle_api:app --host 0.0.0.0 --port 8000 --workers 2
+Restart=always
+RestartSec=5s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target attendance.target

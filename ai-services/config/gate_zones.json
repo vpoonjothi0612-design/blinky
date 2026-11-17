@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "timezone": "Asia/Kolkata",
+  "cameras": {
+    "CAM-02": {
+      "name": "Entry Gate (IN)",
+      "direction": "IN",
+      "face_min_px": 48,
+      "tripwire": {
+        "start": [100, 420],
+        "end": [1180, 420],
+        "normalized_y": 0.58,
+        "entry_vector": [0, 1]
+      },
+      "active_zone_polygon": [
+        [50, 220],
+        [1230, 220],
+        [1230, 700],
+        [50, 700]
+      ]
+    },
+    "CAM-01": {
+      "name": "Exit Gate (OUT)",
+      "direction": "OUT",
+      "face_min_px": 56,
+      "tripwire": {
+        "start": [100, 420],
+        "end": [1180, 420],
+        "normalized_y": 0.58,
+        "entry_vector": [0, -1]
+      },
+      "active_zone_polygon": [
+        [50, 220],
+        [1230, 220],
+        [1230, 700],
+        [50, 700]
+      ]
+    }
+  }
+}

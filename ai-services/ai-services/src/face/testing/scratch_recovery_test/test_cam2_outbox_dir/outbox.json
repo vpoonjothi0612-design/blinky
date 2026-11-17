@@ -1,0 +1,28 @@
+[
+  {
+    "eventId": "f184cbe1-ae85-4480-a8ab-1fba5e762a06",
+    "employeeId": "EMP001",
+    "cameraId": "CAM-02",
+    "eventType": "IN",
+    "similarity": 0.895,
+    "timestamp": "2026-10-31T10:00:00Z",
+    "source": "CP_PLUS_CAM-02",
+    "status": "PRESENT",
+    "_retry_count": 0,
+    "_next_retry_time": 1793443981.0712867,
+    "_notes": null
+  },
+  {
+    "eventId": "6caa31de-dc39-4a6d-90c2-ecb49b9e6f73",
+    "employeeId": "EMP001",
+    "cameraId": "CAM-02",
+    "eventType": "IN",
+    "similarity": 0.895,
+    "timestamp": "2026-10-31T10:00:00Z",
+    "source": "CP_PLUS_CAM-02",
+    "status": "PRESENT",
+    "_retry_count": 0,
+    "_next_retry_time": 1793444044.7481606,
+    "_notes": null
+  }
+]

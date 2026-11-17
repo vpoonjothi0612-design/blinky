@@ -1,0 +1,7 @@
+[Unit]
+Description=Complete Face Attendance and Vehicle Detection System
+After=postgresql.service
+Wants=attendance-ai-api.service attendance-backend.service attendance-ai-camera.service
+
+[Install]
+WantedBy=multi-user.target

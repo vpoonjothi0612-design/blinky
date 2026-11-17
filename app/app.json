@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Face Detection Attendance",
+    "slug": "face-detection-attendance",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#f8fafc"
+    },
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#f8fafc"
+      },
+      "permissions": [
+        "VIBRATE",
+        "INTERNET"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./public/favicon.png",
+      "name": "Face Detection Attendance",
+      "shortName": "FaceAttendance",
+      "lang": "en",
+      "display": "standalone",
+      "orientation": "portrait",
+      "backgroundColor": "#f8fafc",
+      "themeColor": "#0284c7",
+      "description": "Smart Facial Recognition Attendance & Security Surveillance Mobile App"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}

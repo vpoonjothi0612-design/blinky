@@ -1,0 +1,19 @@
+backend/migrations/20261009120000-add-in-out-attendance-and-shifts.js:122: trailing whitespace.
+[32m+[m[32m      CREATE UNIQUE INDEX IF NOT EXISTS idx_attendances_event_id_unique[m[41m [m
+backend/migrations/20261009120000-add-in-out-attendance-and-shifts.js:123: trailing whitespace.
+[32m+[m[32m      ON attendances (event_id)[m[41m [m
+backend/migrations/20261009120000-add-in-out-attendance-and-shifts.js:128: trailing whitespace.
+[32m+[m[32m      CREATE INDEX IF NOT EXISTS idx_attendances_emp_type_time[m[41m [m
+backend/migrations/20261009120000-add-in-out-attendance-and-shifts.js:152: trailing whitespace.
+[32m+[m[32m        UPDATE employees[m[41m [m
+backend/migrations/20261009120000-add-in-out-attendance-and-shifts.js:153: trailing whitespace.
+[32m+[m[32m        SET shift_id = '${defaultShiftId}'[m[41m [m
+backend/src/modules/camera/camera.controller.js:184: new blank line at EOF.
+backend/src/modules/camera/camera.routes.js:37: new blank line at EOF.
+backend/src/routes/index.js:9: trailing whitespace.
+[32m+[m[32mimport shiftRoutes from "../modules/shifts/shift.routes.js";[m[41m[m
+backend/src/routes/index.js:30: trailing whitespace.
+[32m+[m[32mrouter.use("/shifts", shiftRoutes);[m[41m[m
+backend/src/services/aiClient.service.js:345: new blank line at EOF.
+frontend/src/modules/camera/CameraList.jsx:499: new blank line at EOF.
+frontend/src/modules/camera/camera.service.js:66: new blank line at EOF.

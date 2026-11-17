@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, shrink-to-fit=no, viewport-fit=cover"
+    />
+    <title>Face Detection Attendance</title>
+
+    <!-- PWA Web App Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Mobile & PWA Meta Tags -->
+    <meta name="application-name" content="Face Detection Attendance" />
+    <meta name="apple-mobile-web-app-title" content="Face Detection" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#0284c7" />
+    <meta name="msapplication-TileColor" content="#090d16" />
+
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+    <!-- React Native Web Styles Reset -->
+    <style id="expo-reset">
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        background-color: #e2e8f0;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        overflow: hidden;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        width: 100%;
+        align-items: center;
+        justify-content: center;
+        background-color: #e2e8f0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+
+    <!-- PWA Install Prompt & Service Worker Registration -->
+    <script>
+      // Capture PWA beforeinstallprompt event for in-app install triggers
+      window.deferredPWAInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        window.deferredPWAInstallPrompt = e;
+        console.log('[PWA] beforeinstallprompt captured and ready');
+        window.dispatchEvent(new CustomEvent('pwa-installable'));
+      });
+
+      window.addEventListener('appinstalled', () => {
+        window.deferredPWAInstallPrompt = null;
+        console.log('[PWA] App successfully installed on device!');
+        window.dispatchEvent(new CustomEvent('pwa-installed'));
+      });
+
+      // Register Progressive Web App Service Worker
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker
+            .register('/sw.js')
+            .then((registration) => {
+              console.log('[PWA] Service Worker registered with scope:', registration.scope);
+            })
+            .catch((error) => {
+              console.warn('[PWA] Service Worker registration failed:', error);
+            });
+        });
+      }
+    </script>
+  </body>
+</html>
+

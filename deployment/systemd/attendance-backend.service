@@ -1,0 +1,24 @@
+[Unit]
+Description=Attendance and Vehicle Detection Node.js Backend Service
+Documentation=https://github.com/sanjay-dev12/Att-face-recogintion
+After=network.target postgresql.service
+Wants=postgresql.service
+PartOf=attendance.target
+
+[Service]
+Type=simple
+User=attendance
+Group=attendance
+WorkingDirectory=/opt/attendance/backend
+EnvironmentFile=/opt/attendance/backend/.env
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=5s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target attendance.target

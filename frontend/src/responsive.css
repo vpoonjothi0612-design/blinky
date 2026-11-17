@@ -1,0 +1,785 @@
+/* ============================================================
+   RESPONSIVE DESIGN (ENTERPRISE GRADE)
+   ============================================================ */
+
+/* Base mobile card styles */
+.table-mobile-cards {
+  display: none;
+}
+
+.custom-emp-mobile-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.emp-card-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 16px;
+  padding: 16px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--surface);
+}
+
+.emp-card-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+
+.emp-card-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.emp-card-avatar .emp-avatar-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.emp-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.emp-card-title h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.emp-card-title .emp-code {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.emp-card-status {
+  justify-self: end;
+}
+
+.emp-card-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+}
+
+.emp-card-detail {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.emp-card-detail label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.emp-card-detail span {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.emp-card-footer {
+  background: var(--surface-2);
+  border-top: 1px dashed var(--border);
+}
+
+/* Mobile Actions UI Correction */
+.custom-mobile-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: space-around !important;
+  padding: 8px 12px !important;
+  gap: 8px;
+}
+
+.mobile-action-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 48px; /* 44px minimum touch target constraint */
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 8px 4px;
+}
+
+.mobile-action-btn span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Subtle neutral for View */
+.mobile-action-btn.view-btn {
+  color: var(--text-secondary);
+}
+.mobile-action-btn.view-btn:hover,
+.mobile-action-btn.view-btn:focus {
+  background: rgba(0, 0, 0, 0.03);
+}
+.mobile-action-btn.view-btn:active {
+  background: rgba(0, 0, 0, 0.06);
+  transform: scale(0.96);
+}
+
+/* Professional blue for Edit */
+.mobile-action-btn.edit-btn {
+  color: var(--primary);
+}
+.mobile-action-btn.edit-btn:hover,
+.mobile-action-btn.edit-btn:focus {
+  background: var(--primary-light);
+}
+.mobile-action-btn.edit-btn:active {
+  background: var(--primary-light);
+  filter: brightness(0.95);
+  transform: scale(0.96);
+}
+
+/* Red accent for Delete */
+.mobile-action-btn.delete-btn {
+  color: var(--danger);
+}
+.mobile-action-btn.delete-btn:hover,
+.mobile-action-btn.delete-btn:focus {
+  background: var(--danger-light);
+}
+.mobile-action-btn.delete-btn:active {
+  background: var(--danger-light);
+  filter: brightness(0.95);
+  transform: scale(0.96);
+}
+
+/* TABLET LAYOUT (up to 1024px) */
+@media (max-width: 1024px) {
+  /* Sidebar */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--shadow-lg);
+    z-index: 9999 !important;
+  }
+  .sidebar.open {
+    transform: translateX(0) !important;
+    z-index: 9999 !important;
+  }
+  .sidebar-overlay {
+    display: none;
+  }
+  .sidebar-overlay.open {
+    display: block;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 9998 !important;
+    backdrop-filter: blur(2px);
+  }
+  .topbar-menu-btn {
+    display: flex !important;
+  }
+  
+  /* Global Layout */
+  .page-container {
+    padding: 24px 20px 40px !important;
+  }
+  
+  /* Grid Layouts */
+  .summary-cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+}
+
+/* MOBILE LAYOUT (up to 768px) */
+@media (max-width: 768px) {
+  /* Mobile Root & Shell Scrolling */
+  #root {
+    height: 100% !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    overflow: visible !important;
+  }
+  .app-shell {
+    height: 100vh !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+  }
+  .app-main {
+    height: 100vh !important;
+    height: 100dvh !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Header */
+  .topbar {
+    padding: 0 16px !important;
+    gap: 12px;
+  }
+  .topbar-right {
+    gap: 8px !important;
+  }
+  .topbar-global-search,
+  .topbar-back-btn {
+    display: none !important; /* Hide large search bar on mobile */
+  }
+  .topbar-user-chip .topbar-username,
+  .topbar-user-chip .topbar-company-tag,
+  .topbar-user-chip .topbar-user-info-text {
+    display: none !important; /* Only show avatar on mobile */
+  }
+  .header-logout-btn {
+    padding: 0 8px !important;
+    font-size: 11px !important;
+    height: 30px !important;
+  }
+
+  /* Global Layout */
+  .page-container {
+    padding: 16px 16px 40px !important;
+  }
+  
+  /* Typography */
+  .page-title {
+    font-size: 22px !important;
+  }
+  .section-title {
+    font-size: 15px !important;
+  }
+  
+  /* Grid Layouts */
+  /* Universal 2x2 Minimal Stat Cards Grid */
+  .summary-cards-grid,
+  .dash-kpi-grid,
+  .dash-quick-grid,
+  .face-stat-cards-grid,
+  .cam-stat-cards-grid,
+  .veh-stat-cards-grid,
+  .att-stat-cards-grid,
+  .unrec-stat-cards-grid,
+  .staff-sec-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    margin-bottom: 16px !important;
+  }
+
+  /* Minimal Stat Cards Sizing: Uniform, Compact 2x2 Minimal Widgets */
+  .summary-cards-grid > div,
+  .dash-kpi-card,
+  .dash-quick-card,
+  .face-stat-card,
+  .cam-stat-card,
+  .veh-stat-card,
+  .unrec-stat-card {
+    padding: 10px 12px !important;
+    border-radius: 10px !important;
+    min-height: 68px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+  }
+
+  .dash-kpi-header,
+  .face-stat-card-top,
+  .cam-stat-card-top,
+  .veh-stat-card-top,
+  .att-stat-card-top {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+  }
+
+  .dash-kpi-title-wrap,
+  .face-stat-card-meta,
+  .cam-stat-card-meta,
+  .veh-stat-card-meta,
+  .att-stat-card-meta {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+
+  /* Minimal Icon Boxes */
+  .summary-cards-grid > div > div:first-child,
+  .dash-kpi-icon-box,
+  .face-stat-icon-wrap,
+  .cam-stat-icon-wrap,
+  .veh-stat-icon-wrap,
+  .att-stat-icon-wrap,
+  .unrec-stat-icon-wrap,
+  .staff-sec-stat-icon-wrap {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 8px !important;
+    min-width: 32px !important;
+  }
+
+  .summary-cards-grid > div svg,
+  .dash-kpi-icon-box svg,
+  .face-stat-icon-wrap svg,
+  .cam-stat-icon-wrap svg,
+  .veh-stat-icon-wrap svg,
+  .att-stat-icon-wrap svg,
+  .unrec-stat-icon-wrap svg,
+  .staff-sec-stat-icon-wrap svg {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  /* Minimal Labels */
+  .dash-kpi-label,
+  .face-stat-label,
+  .cam-stat-label,
+  .veh-stat-label,
+  .att-stat-label,
+  .unrec-stat-label,
+  .staff-sec-stat-label {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.03em !important;
+    margin-bottom: 2px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Minimal Values */
+  .dash-kpi-number,
+  .face-stat-val,
+  .face-stat-number,
+  .cam-stat-val,
+  .cam-stat-number,
+  .veh-stat-val,
+  .veh-stat-number,
+  .att-stat-val,
+  .att-stat-number,
+  .unrec-stat-val,
+  .staff-sec-stat-val {
+    font-size: 19px !important;
+    font-weight: 800 !important;
+    line-height: 1.1 !important;
+  }
+
+  /* ============================================================
+     REMOVE UNWANTED CLUTTER ON MOBILE — KEEP ONLY MINIMAL ESSENTIALS
+     ============================================================ */
+  /* 1. Remove sparklines, decorative wave graphs, subtexts & trends */
+  .dash-kpi-footer,
+  .dash-kpi-trend,
+  .dash-kpi-sparkline,
+  .face-stat-desc,
+  .face-stat-trend,
+  .face-stat-sparkline,
+  .cam-stat-wave-wrap,
+  .cam-stat-desc,
+  .cam-stat-sub,
+  .veh-stat-wave-wrap,
+  .veh-stat-subtext,
+  .att-stat-desc,
+  .att-stat-trend,
+  .att-stat-card-bottom,
+  .att-stat-wave-wrap,
+  .unrec-stat-desc,
+  .unrec-stat-sparkline,
+  .unrec-stat-sub {
+    display: none !important;
+  }
+
+  /* 2. Remove verbose explanatory paragraphs under page titles */
+  .dash-hero-sub,
+  .dash-status-sub,
+  .dash-quick-sub,
+  .page-subtitle,
+  .page-header p,
+  .face-reg-header p,
+  .cam-header-sub,
+  .veh-header-sub,
+  .staff-sec-subtitle,
+  .att-header-sub,
+  .unrec-header-sub,
+  .table-subtitle {
+    display: none !important;
+  }
+
+  /* 3. Hide floating bottom PWA button on mobile (install icon is already in header) */
+  .pwa-flip-btn-container {
+    display: none !important;
+  }
+
+  /* 4. Hide raw technical camera stream endpoint URLs */
+  .cam-endpoint-badge,
+  .cam-stream-endpoint code,
+  .cam-stream-endpoint {
+    display: none !important;
+  }
+
+  /* 5. Compact Hero Banner on Dashboard */
+  .dash-hero-banner {
+    padding: 12px 14px !important;
+    gap: 10px !important;
+    border-radius: 12px !important;
+  }
+
+  .dash-hero-greeting {
+    font-size: 17px !important;
+  }
+
+  .dash-hero-date {
+    font-size: 10px !important;
+    margin-bottom: 2px !important;
+  }
+
+  .dash-hero-btn-enroll {
+    padding: 8px 14px !important;
+    font-size: 12.5px !important;
+  }
+
+  /* Hide Vehicle Tracking Quick Actions on Mobile View */
+  .veh-quick-actions-card {
+    display: none !important;
+  }
+
+  /* 6. Compact Quick Action Cards on Dashboard */
+  .dash-quick-card {
+    padding: 10px 12px !important;
+    border-radius: 10px !important;
+    gap: 10px !important;
+  }
+
+  .dash-quick-title {
+    font-size: 13px !important;
+  }
+
+  .summary-cards-grid > div > div > svg {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  .summary-cards-grid > div > svg {
+    display: none !important; /* Hide the large decorative background SVGs on mobile */
+  }
+  
+  /* Topbars and Toolbars */
+  .table-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .search-pill-box {
+    max-width: 100% !important;
+  }
+  .search-bar, .filter-bar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .form-actions {
+    flex-direction: column-reverse !important;
+  }
+  .form-actions button {
+    width: 100% !important;
+  }
+
+  /* Inline Forms */
+  div[style*="display: flex"][style*="gap: 12px"],
+  div[style*="display: flex"][style*="gap: 16px"],
+  div[style*="display: flex"][style*="gap: 20px"],
+  div[style*="display: flex"][style*="gap: 24px"] {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  
+  /* Exception for button groups and small elements */
+  .action-buttons, .status-pill, .badge, .topbar-left, .topbar-right, .topbar-user-chip, .sidebar-brand-block, .sidebar-user-block, .dashboard-welcome-content, .empty-table-state, .search-pill-box, .stat-card {
+    flex-direction: row !important;
+  }
+
+  /* Force flex-wrap for button rows that must stay row but shouldn't overflow */
+  div[style*="display: flex"][style*="align-items: center"] {
+    flex-wrap: wrap !important;
+  }
+  
+  /* Restore row layout for modal headers */
+  div[style*="justify-content: space-between"] {
+    flex-direction: row !important;
+  }
+  
+  /* Fix specific tables overflow */
+  .table-responsive {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    width: 100% !important;
+    margin-bottom: 16px !important;
+    border-radius: var(--radius-md) !important;
+  }
+  
+  /* Modals */
+  .modal-content {
+    width: calc(100% - 32px) !important;
+    margin: 16px !important;
+    max-height: calc(100vh - 32px) !important;
+    overflow-y: auto !important;
+  }
+  
+  /* Face Enrollments layout */
+  .enrollment-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .capture-panels {
+    grid-template-columns: 1fr !important;
+  }
+  .video-preview-wrapper {
+    height: auto !important;
+    aspect-ratio: 4/3 !important;
+  }
+  
+  /* Dashboard Welcome */
+  .dashboard-welcome-content {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+  
+  /* Attendance Details grid */
+  .attendance-details-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Fix View Modal details grids */
+  div[style*="grid-template-columns: 1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* =========================================================
+     TABLE TO CARD VIEW (MOBILE)
+     ========================================================= */
+  
+  .table-responsive {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .custom-table {
+    min-width: 0 !important;
+    display: block !important;
+  }
+
+  .custom-table thead {
+    display: none !important;
+  }
+
+  .custom-table tbody {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 16px !important;
+  }
+
+  .custom-table tr {
+    display: flex !important;
+    flex-direction: column !important;
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+    overflow: hidden !important;
+    margin-bottom: 24px !important;
+    transition: transform 0.2s, box-shadow 0.2s !important;
+  }
+
+  .custom-table tr:active {
+    transform: scale(0.98) !important;
+  }
+
+  .custom-table td {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    min-height: 52px !important;
+    padding: 14px 20px !important;
+    border: none !important;
+    border-bottom: 1px solid var(--border-light) !important;
+    position: relative !important;
+  }
+
+  .custom-table td:last-child {
+    border-bottom: none !important;
+    background: var(--surface-2) !important;
+    border-top: 1px dashed var(--border) !important;
+    justify-content: center !important;
+    padding: 16px 20px !important;
+  }
+
+  /* When the final cell contains action buttons, flex-direction might need to be horizontal */
+  .custom-table td:last-child .td-content {
+    justify-content: center !important;
+    width: 100% !important;
+  }
+
+  .custom-table td::before {
+    content: attr(data-label);
+    flex: 0 0 35% !important;
+    text-align: left !important;
+    font-weight: 700 !important;
+    font-size: 11.5px !important;
+    color: var(--text-secondary) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .custom-table td:last-child[data-label="Actions"]::before,
+  .custom-table td:last-child[data-label="ACTIONS"]::before {
+    display: none !important;
+  }
+
+  .custom-table td .td-content {
+    flex: 1 !important;
+    text-align: right !important;
+    display: flex !important;
+    justify-content: flex-end !important;
+    align-items: center !important;
+    word-break: break-word !important;
+    color: var(--text-primary) !important;
+    font-weight: 500 !important;
+  }
+
+  /* Custom Render Mobile Card overrides */
+  .desktop-only-table {
+    display: none !important;
+  }
+  .table-mobile-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+  }
+  /* Staff & Security Responsive Overrides */
+  
+  /* Dedicated Attendance Stat Card Minimal */
+  .att-stat-card {
+    padding: 8px 10px !important;
+    border-radius: 10px !important;
+    min-height: 54px !important;
+    max-height: 64px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    box-sizing: border-box !important;
+  }
+  .staff-sec-stat-card {
+    padding: 10px 12px !important;
+    border-radius: 10px !important;
+    min-height: 60px !important;
+    max-height: 72px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    box-sizing: border-box !important;
+  }
+
+  .staff-sec-stat-info {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+
+  .staff-sec-desktop-table {
+    display: none !important;
+  }
+
+  .staff-sec-mobile-cards {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    width: 100% !important;
+  }
+
+  /* Reports Dashboard Mobile Overrides */
+  .report-desktop-table {
+    display: none !important;
+  }
+
+  .report-mobile-cards {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    width: 100% !important;
+  }
+
+  /* Camera Feeds Mobile Overrides */
+  .cam-desktop-table {
+    display: none !important;
+  }
+  .cam-mobile-cards {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    width: 100% !important;
+  }
+  .cam-subtitle {
+    display: none !important;
+  }
+
+  /* Employee Directory Mobile Overrides */
+  .emp-desktop-table {
+    display: none !important;
+  }
+
+  .emp-mobile-cards {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    width: 100% !important;
+  }
+}

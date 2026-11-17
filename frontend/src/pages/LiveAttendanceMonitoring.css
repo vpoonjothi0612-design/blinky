@@ -1,0 +1,1984 @@
+/* ============================================================
+   LIVE ATTENDANCE MONITORING DASHBOARD STYLING
+   Full-Screen Dual Camera Surveillance (Cam IN & Cam OUT)
+   With Bottom Live Marked Employee Strip on Both Cameras
+   (Photo [Passport Size] | Name | Dept | Time)
+   ============================================================ */
+
+.lam-container {
+  padding: 0.85rem 1.25rem 2.5rem;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--text-primary, #0f172a);
+  transition: all 0.2s ease-in-out;
+}
+
+/* ── Fullscreen Surveillance Mode ── */
+.lam-container.fullscreen-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  background: #030712;
+  overflow-y: auto;
+  border-radius: 0;
+}
+
+/* ── Top Header Surveillance Bar ── */
+.lam-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2ece8);
+  border-radius: 14px;
+  padding: 0.85rem 1.25rem;
+  box-shadow: 0 4px 16px rgba(13, 34, 30, 0.04);
+}
+
+.fullscreen-mode .lam-header {
+  background: #0b1120;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.lam-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.lam-header-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.28);
+  flex-shrink: 0;
+}
+
+.lam-header-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.lam-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.lam-title-group h1 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  margin: 0;
+  letter-spacing: -0.02em;
+  color: var(--text-primary, #0d221e);
+}
+
+.fullscreen-mode .lam-title-group h1 {
+  color: #f8fafc;
+}
+
+.lam-dual-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.fullscreen-mode .lam-dual-badge {
+  color: #34d399;
+}
+
+.lam-title-group p {
+  font-size: 0.78rem;
+  color: var(--text-muted, #68877e);
+  margin: 0.2rem 0 0 0;
+}
+
+.fullscreen-mode .lam-title-group p {
+  color: #94a3b8;
+}
+
+/* ── Telemetry KPI Chips ── */
+.lam-telemetry-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.lam-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--surface-2, #f8fafc);
+}
+
+.fullscreen-mode .lam-chip {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.lam-chip .chip-label {
+  font-size: 0.65rem;
+  color: var(--text-muted, #64748b);
+  letter-spacing: 0.04em;
+}
+
+.lam-chip .chip-val {
+  font-size: 0.88rem;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.lam-chip.in {
+  color: #059669;
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.lam-chip.out {
+  color: #e11d48;
+  border-color: rgba(244, 63, 94, 0.25);
+}
+
+.lam-chip.present {
+  color: #2563eb;
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.lam-chip.unknown {
+  color: #d97706;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.lam-chip.fps {
+  color: #7c3aed;
+  border-color: rgba(139, 92, 246, 0.25);
+}
+
+/* ── Header Right Fullscreen Action ── */
+.lam-header-actions {
+  display: flex;
+  align-items: center;
+}
+
+.lam-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.95rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--border, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text-primary, #0f172a);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.fullscreen-mode .lam-btn {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #f1f5f9;
+}
+
+.lam-btn:hover {
+  background: var(--surface-2, #f1f5f9);
+  transform: translateY(-1px);
+}
+
+.fullscreen-mode .lam-btn:hover {
+  background: #334155;
+}
+
+.lam-btn-fullscreen-active {
+  background: #f43f5e !important;
+  color: #ffffff !important;
+  border-color: #f43f5e !important;
+  box-shadow: 0 2px 10px rgba(244, 63, 94, 0.35);
+}
+
+/* ════════════════════════════════════════════════════════════
+   MAIN DUAL CAMERA GRID (LEFT: CAM IN | RIGHT: CAM OUT)
+   ════════════════════════════════════════════════════════════ */
+.lam-dual-monitor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.15rem;
+  align-items: stretch;
+  width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .lam-dual-monitor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lam-cam-pane {
+  background: #090e17;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+}
+
+.lam-pane-in {
+  border-top: 4px solid #10b981;
+}
+
+.lam-pane-out {
+  border-top: 4px solid #f43f5e;
+}
+
+/* Pane Header */
+.lam-pane-header {
+  padding: 0.75rem 1.15rem;
+  background: #0f172a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lam-pane-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lam-live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 10px #10b981;
+}
+
+.lam-live-dot.offline {
+  background: #ef4444;
+  box-shadow: 0 0 10px #ef4444;
+}
+
+.lam-pane-name {
+  color: #ffffff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.lam-pane-ip {
+  color: #94a3b8;
+  font-size: 0.74rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.lam-pane-tags {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+}
+
+.lam-dir-tag {
+  padding: 0.22rem 0.55rem;
+  border-radius: 6px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.lam-dir-tag.in {
+  background: #059669;
+  color: #ffffff;
+}
+
+.lam-dir-tag.out {
+  background: #e11d48;
+  color: #ffffff;
+}
+
+.lam-spec-tag,
+.lam-model-tag {
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Viewport Area */
+.lam-pane-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #020617;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.lam-stream-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* In-Video HUD Overlay */
+.lam-pane-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.85rem;
+  z-index: 5;
+}
+
+.lam-hud-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.lam-hud-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(6px);
+  padding: 0.28rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.rec-pulse-circle {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: lam-rec-blink 1s infinite alternate;
+}
+
+.rec-pulse-circle.in {
+  background: #10b981;
+}
+
+.rec-pulse-circle.out {
+  background: #f43f5e;
+}
+
+@keyframes lam-rec-blink {
+  from { opacity: 1; }
+  to { opacity: 0.25; }
+}
+
+.lam-hud-fps {
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(6px);
+  padding: 0.28rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #38bdf8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.lam-hud-bottom-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.lam-hud-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(6px);
+  padding: 0.3rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.lam-hud-stamp .divider {
+  color: #64748b;
+}
+
+.lam-hud-zone {
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(6px);
+  padding: 0.3rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  font-size: 0.7rem;
+}
+
+/* ════════════════════════════════════════════════════════════
+   LIVE GRID BOTTOM STRIP: WHICH EMPLOYEE MARKED THAT SHOW IT
+   Exact representation of user notebook drawing:
+   [ Photo (Passport Size) ] | [ Name ] | [ Dept ] | [ Time ]
+   ════════════════════════════════════════════════════════════ */
+.lam-marked-bottom-strip {
+  background: #0b1120;
+  border-top: 2px solid rgba(255, 255, 255, 0.1);
+  padding: 0.85rem 1.15rem;
+  transition: all 0.3s ease;
+  min-height: 108px;
+  display: flex;
+  align-items: center;
+}
+
+.lam-marked-bottom-strip.in {
+  border-top-color: rgba(16, 185, 129, 0.4);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, #080d1a 100%);
+}
+
+.lam-marked-bottom-strip.out {
+  border-top-color: rgba(244, 63, 94, 0.4);
+  background: linear-gradient(180deg, rgba(244, 63, 94, 0.08) 0%, #080d1a 100%);
+}
+
+.lam-marked-bottom-strip.pulse-in {
+  animation: lam-strip-pulse-in 2s ease-in-out;
+}
+
+.lam-marked-bottom-strip.pulse-out {
+  animation: lam-strip-pulse-out 2s ease-in-out;
+}
+
+@keyframes lam-strip-pulse-in {
+  0% {
+    background-color: rgba(16, 185, 129, 0.35);
+    box-shadow: inset 0 0 24px rgba(16, 185, 129, 0.5);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+@keyframes lam-strip-pulse-out {
+  0% {
+    background-color: rgba(244, 63, 94, 0.35);
+    box-shadow: inset 0 0 24px rgba(244, 63, 94, 0.5);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.lam-marked-content {
+  display: grid;
+  grid-template-columns: 80px 1.4fr 1.2fr 0.9fr;
+  gap: 1rem;
+  align-items: center;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .lam-marked-content {
+    grid-template-columns: 70px 1fr;
+    gap: 0.75rem;
+  }
+  .dept-col, .time-col {
+    grid-column: span 2;
+  }
+}
+
+/* Passport-Size Photo Box (3:4 portrait ratio) */
+.lam-passport-photo-box {
+  width: 72px;
+  height: 90px; /* Standard passport 4:5 aspect ratio */
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  background: #020617;
+  border: 2px solid #10b981;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.lam-passport-photo-box.out {
+  border-color: #f43f5e;
+}
+
+.lam-passport-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.lam-passport-badge {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(16, 185, 129, 0.95);
+  color: #ffffff;
+  font-size: 0.52rem;
+  font-weight: 800;
+  padding: 0.08rem 0.35rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+
+.lam-passport-badge.out {
+  background: rgba(225, 29, 72, 0.95);
+}
+
+/* Column Labels & Text */
+.lam-marked-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.lam-marked-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lam-marked-name {
+  font-size: 1.08rem;
+  font-weight: 800;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+
+.lam-marked-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: 0.15rem;
+}
+
+.lam-code-pill {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.lam-code-pill.in {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.lam-code-pill.out {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.lam-dir-pill {
+  font-size: 0.66rem;
+  font-weight: 800;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+}
+
+.lam-dir-pill.in {
+  background: #059669;
+  color: #ffffff;
+}
+
+.lam-dir-pill.out {
+  background: #e11d48;
+  color: #ffffff;
+}
+
+.lam-status-pill {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.lam-marked-val {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lam-marked-val.time {
+  font-family: 'JetBrains Mono', monospace;
+  color: #38bdf8;
+  font-size: 0.95rem;
+}
+
+.lam-marked-muted {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lam-marked-conf {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.lam-marked-conf.in {
+  color: #34d399;
+}
+
+.lam-marked-conf.out {
+  color: #fb7185;
+}
+
+/* Awaiting Detection State in Bottom Strip */
+.lam-marked-awaiting {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+}
+
+.lam-awaiting-radar {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.lam-awaiting-radar.in {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #10b981;
+}
+
+.lam-awaiting-radar.out {
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  color: #f43f5e;
+}
+
+.lam-awaiting-radar svg {
+  width: 22px;
+  height: 22px;
+  animation: lam-rec-blink 1.2s infinite alternate;
+}
+
+.lam-awaiting-text strong {
+  font-size: 0.85rem;
+  color: #ffffff;
+  display: block;
+}
+
+.lam-awaiting-text p {
+  font-size: 0.74rem;
+  color: #94a3b8;
+  margin: 0.2rem 0 0 0;
+}
+
+/* ════════════════════════════════════════════════════════════
+   COLLAPSIBLE BOTTOM DRAWER (LOGS & STORED PHOTOS)
+   ════════════════════════════════════════════════════════════ */
+.lam-drawer-section {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2ece8);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(13, 34, 30, 0.04);
+}
+
+.fullscreen-mode .lam-drawer-section {
+  background: #0b1120;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.lam-drawer-toggle-bar {
+  padding: 0.75rem 1.15rem;
+  background: var(--surface-2, #f8fafc);
+  border-bottom: 1px solid var(--border, #e2ece8);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.fullscreen-mode .lam-drawer-toggle-bar {
+  background: #111827;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.lam-drawer-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.lam-drawer-tab {
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border: 1px solid var(--border, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: all 0.15s;
+}
+
+.fullscreen-mode .lam-drawer-tab {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+}
+
+.lam-drawer-tab.active {
+  background: #059669;
+  color: #ffffff;
+  border-color: #059669;
+}
+
+.fullscreen-mode .lam-drawer-tab.active {
+  background: #10b981;
+  color: #ffffff;
+  border-color: #10b981;
+}
+
+.drawer-arrow {
+  font-size: 0.65rem;
+  opacity: 0.8;
+}
+
+.lam-drawer-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.lam-filter-input,
+.lam-filter-select {
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  border: 1px solid var(--border, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text-primary, #0f172a);
+}
+
+.fullscreen-mode .lam-filter-input,
+.fullscreen-mode .lam-filter-select {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.lam-drawer-content {
+  padding: 1rem 1.15rem;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+/* ── Activity Table ── */
+.lam-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.lam-table th {
+  padding: 0.65rem 0.85rem;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted, #64748b);
+  border-bottom: 2px solid var(--border, #e2ece8);
+  letter-spacing: 0.03em;
+}
+
+.fullscreen-mode .lam-table th {
+  color: #94a3b8;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.lam-table td {
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border, #f1f5f9);
+  vertical-align: middle;
+}
+
+.fullscreen-mode .lam-table td {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.lam-emp-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.lam-table-thumb {
+  width: 32px;
+  height: 40px; /* Passport portrait proportion */
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1.5px solid #10b981;
+}
+
+.lam-emp-text-name {
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+.fullscreen-mode .lam-emp-text-name {
+  color: #ffffff;
+}
+
+.lam-emp-text-code {
+  font-size: 0.68rem;
+  color: var(--text-muted, #64748b);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.lam-code-badge {
+  background: var(--surface-2, #e8f8f2);
+  color: var(--primary, #059669);
+  padding: 0.18rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.lam-badge-sm {
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.lam-badge-sm.in {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+.lam-badge-sm.out {
+  background: rgba(244, 63, 94, 0.15);
+  color: #e11d48;
+}
+
+.lam-badge-sm.present {
+  background: rgba(59, 130, 246, 0.15);
+  color: #2563eb;
+}
+
+.lam-btn-mini {
+  background: var(--surface-2, #f1f5f9);
+  border: 1px solid var(--border, #cbd5e1);
+  padding: 0.25rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.fullscreen-mode .lam-btn-mini {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+/* ── Stored Photos Grid ── */
+.lam-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.85rem;
+}
+
+.lam-photo-item {
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--border, #e2ece8);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.fullscreen-mode .lam-photo-item {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.lam-photo-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+}
+
+.lam-photo-img-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5; /* Passport photo ratio */
+  background: #020617;
+}
+
+.lam-grid-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lam-photo-tag {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  padding: 0.12rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.lam-photo-tag.green {
+  background: rgba(16, 185, 129, 0.9);
+  color: #ffffff;
+}
+
+.lam-photo-tag.blue {
+  background: rgba(59, 130, 246, 0.9);
+  color: #ffffff;
+}
+
+.lam-photo-tag.amber {
+  background: rgba(245, 158, 11, 0.9);
+  color: #ffffff;
+}
+
+.lam-photo-info {
+  padding: 0.5rem;
+  font-size: 0.72rem;
+}
+
+.lam-photo-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.lam-photo-title strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary, #0f172a);
+}
+
+.fullscreen-mode .lam-photo-title strong {
+  color: #ffffff;
+}
+
+.lam-photo-cam {
+  font-size: 0.65rem;
+  color: var(--text-muted, #64748b);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.lam-photo-time {
+  font-size: 0.65rem;
+  color: var(--text-muted, #64748b);
+  margin-top: 0.15rem;
+}
+
+/* ── Photo Inspection Modal ── */
+.lam-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.lam-modal-content {
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  max-width: 680px;
+  width: 100%;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75);
+  color: #ffffff;
+}
+
+.lam-modal-header {
+  padding: 1rem 1.25rem;
+  background: #1e293b;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lam-modal-title h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.lam-modal-sub {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.lam-modal-close {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #cbd5e1;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.lam-modal-body {
+  padding: 1.25rem;
+  display: flex;
+  gap: 1.25rem;
+}
+
+@media (max-width: 640px) {
+  .lam-modal-body {
+    flex-direction: column;
+  }
+}
+
+.lam-modal-photo-col {
+  width: 200px;
+  height: 250px; /* Passport proportion */
+  flex-shrink: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid #10b981;
+  background: #020617;
+}
+
+.lam-modal-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.lam-modal-meta-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.lam-modal-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.76rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.lam-meta-label {
+  color: #94a3b8;
+}
+
+.lam-meta-value {
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.lam-meta-value.highlight {
+  font-size: 0.95rem;
+  color: #34d399;
+}
+
+.lam-meta-value.code {
+  font-family: 'JetBrains Mono', monospace;
+  color: #38bdf8;
+}
+
+.lam-meta-value.mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+}
+
+.lam-meta-value.green {
+  color: #34d399;
+}
+
+.lam-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+
+/* ── Multi-Track Container and Sub-Panel (Section 5 Support) ── */
+.lam-right-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.lam-match-pill {
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #047857;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  text-transform: uppercase;
+}
+
+.lam-multi-track-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2ece8);
+  border-radius: 16px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 4px 16px rgba(13, 34, 30, 0.04);
+}
+
+.lam-multi-track-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.lam-multi-track-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-primary, #0d221e);
+}
+
+.lam-multi-track-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.lam-multi-track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.lam-track-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e2ece8);
+  background: var(--surface-secondary, #f8fafc);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lam-track-row:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.lam-track-row.selected {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: #10b981;
+}
+
+.lam-track-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1.5px solid #10b981;
+  background: #0f172a;
+  flex-shrink: 0;
+}
+
+.lam-track-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.lam-track-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.2rem;
+}
+
+.lam-track-id-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #38bdf8;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.lam-track-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lam-track-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--text-muted, #64748b);
+}
+
+.lam-badge-mini {
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+}
+
+.lam-badge-mini.in {
+  background: rgba(16, 185, 129, 0.15);
+  color: #047857;
+}
+
+.lam-badge-mini.out {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
+}
+
+.lam-track-status-pill {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #059669;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+/* ── Interactive Biometric Bounding Box for Webcam / Scanning ── */
+.lam-webcam-hud-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 240px;
+  height: 240px;
+  border: 1px dashed rgba(16, 185, 129, 0.6);
+  border-radius: 12px;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
+  pointer-events: none;
+}
+
+.lam-target-bracket {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border: 3px solid #10b981;
+}
+
+.lam-target-bracket.top-left {
+  top: -2px;
+  left: -2px;
+  border-right: none;
+  border-bottom: none;
+  border-top-left-radius: 8px;
+}
+
+.lam-target-bracket.top-right {
+  top: -2px;
+  right: -2px;
+  border-left: none;
+  border-bottom: none;
+  border-top-right-radius: 8px;
+}
+
+.lam-target-bracket.bottom-left {
+  bottom: -2px;
+  left: -2px;
+  border-right: none;
+  border-top: none;
+  border-bottom-left-radius: 8px;
+}
+
+.lam-target-bracket.bottom-right {
+  bottom: -2px;
+  right: -2px;
+  border-left: none;
+  border-top: none;
+  border-bottom-right-radius: 8px;
+}
+
+.lam-target-tag {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.85);
+  color: #10b981;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  border: 1px solid #10b981;
+}
+
+.lam-hud-ai-tag {
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  font-size: 0.68rem;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Camera Offline / Error State Overlay ── */
+.lam-video-offline-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+  z-index: 5;
+}
+
+.lam-offline-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.lam-video-offline-overlay h3 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #f8fafc;
+  margin: 0 0 0.4rem 0;
+}
+
+.lam-video-offline-overlay p {
+  font-size: 0.88rem;
+  color: #94a3b8;
+  margin: 0 0 1.25rem 0;
+  max-width: 420px;
+}
+
+.lam-offline-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ── Pagination Bar Controls ── */
+.lam-pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border, #e2ece8);
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.lam-pagination-info {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+}
+
+.lam-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.lam-page-size-select {
+  padding: 0.3rem 0.5rem;
+  margin-left: 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong, #c7dfd6);
+  background: var(--surface, #ffffff);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary, #0d221e);
+}
+
+.lam-page-nav-btn {
+  padding: 0.4rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong, #c7dfd6);
+  background: var(--surface, #ffffff);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-primary, #0d221e);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lam-page-nav-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.lam-page-nav-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lam-page-number {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+/* ============================================================
+   MULTI-CLASS GATE SURVEILLANCE & SECURITY ALARM STYLING
+   ============================================================ */
+
+/* ── Security Alarm Floating Banner ── */
+.lam-security-alarm-banner {
+  background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%);
+  color: #ffffff;
+  padding: 0.85rem 1.25rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
+  animation: alarmBannerPulse 1.2s infinite alternate;
+  z-index: 1000;
+}
+
+@keyframes alarmBannerPulse {
+  0% { transform: scale(1); box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3); }
+  100% { transform: scale(1.006); box-shadow: 0 10px 30px rgba(239, 68, 68, 0.6); }
+}
+
+.alarm-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.alarm-siren-icon {
+  font-size: 1.8rem;
+  animation: sirenWiggle 0.5s infinite alternate;
+}
+
+@keyframes sirenWiggle {
+  from { transform: rotate(-10deg); }
+  to { transform: rotate(10deg); }
+}
+
+.alarm-text-group strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.alarm-text-group p {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.92;
+}
+
+.lam-alarm-dismiss-btn {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lam-alarm-dismiss-btn:hover {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* ── Fullscreen Camera Toggle Buttons ── */
+.lam-fullscreen-cam-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 0.25rem 0.35rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.cam-select-btn {
+  background: transparent;
+  color: #94a3b8;
+  border: none;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cam-select-btn.active {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+/* ── Fullscreen Camera Grid Adjustments ── */
+.fullscreen-mode .lam-dual-monitor-grid {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.fullscreen-cam-02,
+.fullscreen-cam-01 {
+  grid-template-columns: 1fr !important;
+}
+
+.fullscreen-mode .lam-dual-monitor-grid.fullscreen-cam-02,
+.fullscreen-mode .lam-dual-monitor-grid.fullscreen-cam-01 {
+  grid-template-columns: 1fr !important;
+  display: block !important;
+  width: 100% !important;
+}
+
+.fullscreen-cam-02 .lam-pane-in,
+.fullscreen-cam-01 .lam-pane-out {
+  flex: 1 1 100% !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.fullscreen-mode.fullscreen-cam-02 .lam-pane-viewport,
+.fullscreen-mode.fullscreen-cam-01 .lam-pane-viewport,
+.fullscreen-mode .fullscreen-cam-02 .lam-pane-viewport,
+.fullscreen-mode .fullscreen-cam-01 .lam-pane-viewport {
+  max-height: calc(100vh - 240px);
+}
+
+/* Registered and Unregistered Badges */
+.lam-registered-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.lam-unregistered-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f43f5e;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.lam-passport-badge.reg {
+  background: #059669 !important;
+  color: #ffffff !important;
+}
+
+.lam-passport-badge.unreg {
+  background: #e11d48 !important;
+  color: #ffffff !important;
+}
+
+.lam-passport-photo-box.registered {
+  border-color: #10b981;
+}
+
+.lam-passport-photo-box.unregistered {
+  border-color: #f43f5e;
+}
+
+/* ── Dual Lanes (IN & OUT) Section ── */
+.lam-dual-lanes-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 900px) {
+  .lam-dual-lanes-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lam-event-lane {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2ece8);
+  border-radius: 14px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fullscreen-mode .lam-event-lane {
+  background: #0b1120;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.lane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border, #e2ece8);
+  padding-bottom: 0.5rem;
+}
+
+.fullscreen-mode .lane-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.lane-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lane-header h3 {
+  font-size: 0.95rem;
+  font-weight: 800;
+  margin: 0;
+  color: var(--text-primary, #0f172a);
+}
+
+.fullscreen-mode .lane-header h3 {
+  color: #f1f5f9;
+}
+
+.lane-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.lane-dot.in {
+  background: #10b981;
+}
+
+.lane-dot.out {
+  background: #ef4444;
+}
+
+.lane-count-tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.fullscreen-mode .lane-count-tag {
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+.lane-cards-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 120px;
+}
+
+.lane-view-all {
+  align-self: flex-end;
+  margin: 0.35rem 0.75rem 0.65rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #059669;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.crossing-employee-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.lane-empty-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* ── Individual Event Card ── */
+.lam-event-card {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--border, #e2ece8);
+  border-radius: 10px;
+  padding: 0.6rem 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.lam-event-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  border-color: #94a3b8;
+}
+
+.fullscreen-mode .lam-event-card {
+  background: #131d31;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.fullscreen-mode .lam-event-card:hover {
+  background: #1a2742;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.new-event-glow {
+  animation: newEventFlash 2s ease-out;
+}
+
+@keyframes newEventFlash {
+  0% { box-shadow: 0 0 16px rgba(14, 165, 233, 0.8); border-color: #38bdf8; }
+  100% { box-shadow: none; }
+}
+
+.event-card-photo-box {
+  width: 52px;
+  height: 65px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0f172a;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.event-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.event-card-details {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.event-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.event-card-name {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--text-primary, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fullscreen-mode .event-card-name {
+  color: #f8fafc;
+}
+
+.event-card-dept {
+  font-size: 0.75rem;
+  color: var(--text-muted, #64748b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fullscreen-mode .event-card-dept {
+  color: #94a3b8;
+}
+
+.event-card-time {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0284c7;
+}
+
+/* ── Badges ── */
+.event-card-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.badge-recognized {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-unknown {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge-vehicle {
+  background: rgba(14, 165, 233, 0.15);
+  color: #0284c7;
+  border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+.badge-animal {
+  background: rgba(234, 179, 8, 0.15);
+  color: #ca8a04;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.badge-noface {
+  background: rgba(168, 85, 247, 0.15);
+  color: #9333ea;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.badge-other {
+  background: rgba(100, 116, 139, 0.15);
+  color: #64748b;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}

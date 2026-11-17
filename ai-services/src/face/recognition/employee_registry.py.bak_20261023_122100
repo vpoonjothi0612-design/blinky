@@ -1,0 +1,586 @@
+"""Employee Registry & Embedding Store Manager.
+
+Manages employee metadata and reference embeddings stored in:
+- data/employees.json (metadata registry)
+- data/face_embeddings/<employeeId>_multiview_v2.npy (feature vectors)
+
+Features:
+1. Strict employee ID validation (alphanumeric, no path traversal).
+2. Dynamic auto-discovery of face embedding files.
+3. In-memory loading and normalization verification of all active embeddings.
+4. Duplicate face registration detection against existing registered embeddings.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
+
+import numpy as np
+
+# -----------------------------------------------------------------------------
+# Path Configurations & Central Config
+# -----------------------------------------------------------------------------
+
+AI_SERVICES_DIR = Path(__file__).resolve().parents[3]
+_FACE_DIR = Path(__file__).resolve().parents[1]
+if str(_FACE_DIR) not in sys.path:
+    sys.path.append(str(_FACE_DIR))
+
+try:
+    from face_config import (
+        DATA_DIR,
+        REGISTRY_FILE,
+        EMBEDDINGS_DIR,
+        PROTECTED_EMPLOYEE_IDS,
+        DUPLICATE_REGISTRATION_THRESHOLD,
+        PROFILE_RECOGNITION_THRESHOLD,
+    )
+except ImportError:
+    DATA_DIR = AI_SERVICES_DIR / "data"
+    REGISTRY_FILE = DATA_DIR / "employees.json"
+    EMBEDDINGS_DIR = DATA_DIR / "face_embeddings"
+    PROTECTED_EMPLOYEE_IDS = frozenset()
+    DUPLICATE_REGISTRATION_THRESHOLD = 0.75
+    PROFILE_RECOGNITION_THRESHOLD = 0.50
+
+# Validation pattern: Alphanumeric with underscores and hyphens, 2-32 chars
+EMPLOYEE_ID_REGEX = re.compile(r"^[A-Za-z0-9_-]{2,32}$")
+
+
+# -----------------------------------------------------------------------------
+# Validation Functions
+# -----------------------------------------------------------------------------
+
+def validate_employee_id(employee_id: str) -> Tuple[bool, str]:
+    """Validates employee ID format to avoid empty values, injection, or invalid filenames.
+
+    Args:
+        employee_id: Proposed identifier (e.g., 'EMP001', 'STAFF_02').
+
+    Returns:
+        Tuple of (is_valid, error_message).
+    """
+    if not employee_id:
+        return False, "Employee ID cannot be empty."
+
+    emp_clean = employee_id.strip()
+    if len(emp_clean) < 2:
+        return False, f"Employee ID '{emp_clean}' is too short (minimum 2 characters)."
+    if len(emp_clean) > 32:
+        return False, f"Employee ID '{emp_clean}' is too long (maximum 32 characters)."
+
+    if not EMPLOYEE_ID_REGEX.match(emp_clean):
+        return False, (
+            f"Invalid Employee ID '{emp_clean}'. Only letters, numbers, underscores (_), "
+            f"and hyphens (-) are permitted (no spaces or special symbols)."
+        )
+
+    # Prevent reserved words or relative directory names
+    if emp_clean.lower() in ("con", "prn", "aux", "nul", ".", "..", "none", "null"):
+        return False, f"Employee ID '{emp_clean}' uses a reserved system keyword."
+
+    return True, ""
+
+
+# -----------------------------------------------------------------------------
+# Registry Management
+# -----------------------------------------------------------------------------
+
+def load_registry() -> List[Dict[str, Any]]:
+    """Loads employee records from data/employees.json.
+
+    Auto-seeds or auto-discovers if registry does not yet exist.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    EMBEDDINGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not REGISTRY_FILE.exists():
+        # Check if any existing embeddings can be auto-registered
+        initial_registry = auto_discover_embeddings_to_registry()
+        save_registry(initial_registry)
+        return initial_registry
+
+    try:
+        content = REGISTRY_FILE.read_text(encoding="utf-8").strip()
+        if not content:
+            initial_registry = auto_discover_embeddings_to_registry()
+            save_registry(initial_registry)
+            return initial_registry
+
+        records = json.loads(content)
+        if isinstance(records, list):
+            return records
+        return []
+    except Exception as ex:
+        print(f"[Warning] Failed to parse {REGISTRY_FILE}: {ex}. Rebuilding registry.")
+        initial_registry = auto_discover_embeddings_to_registry()
+        save_registry(initial_registry)
+        return initial_registry
+
+
+def save_registry(records: List[Dict[str, Any]]) -> None:
+    """Saves employee list into data/employees.json formatted cleanly."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    REGISTRY_FILE.write_text(json.dumps(records, indent=2), encoding="utf-8")
+
+
+def auto_discover_embeddings_to_registry() -> List[Dict[str, Any]]:
+    """Scans data/face_embeddings/ for .npy files and creates initial registry records."""
+    records: List[Dict[str, Any]] = []
+    if not EMBEDDINGS_DIR.exists():
+        return records
+
+    found_files = list(EMBEDDINGS_DIR.glob("*.npy"))
+    # Priority to multiview_v2 files
+    v2_files = [f for f in found_files if "_multiview_v2.npy" in f.name]
+    other_files = [f for f in found_files if "_multiview_v2.npy" not in f.name]
+
+    registered_ids = set()
+
+    # Process v2 files first
+    for f in v2_files:
+        emp_id = f.name.replace("_multiview_v2.npy", "").strip()
+        valid, _ = validate_employee_id(emp_id)
+        if valid and emp_id not in registered_ids:
+            records.append({
+                "employeeId": emp_id,
+                "name": f"Employee {emp_id}",
+                "embeddingFile": f.name,
+                "status": "active",
+            })
+            registered_ids.add(emp_id)
+
+    # Process other .npy files if employee not yet registered
+    for f in other_files:
+        emp_id = f.name.replace(".npy", "").replace("_multiview", "").strip()
+        valid, _ = validate_employee_id(emp_id)
+        if valid and emp_id not in registered_ids:
+            records.append({
+                "employeeId": emp_id,
+                "name": f"Employee {emp_id}",
+                "embeddingFile": f.name,
+                "status": "active",
+            })
+            registered_ids.add(emp_id)
+
+    return records
+
+
+def get_employee(employee_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves an employee record by employeeId."""
+    records = load_registry()
+    for r in records:
+        if r.get("employeeId") == employee_id:
+            return r
+    return None
+
+
+def register_or_update_employee(
+    employee_id: str,
+    name: Optional[str] = None,
+    embedding_file: Optional[str] = None,
+    status: str = "active",
+) -> Dict[str, Any]:
+    """Registers a new employee or updates an existing record in data/employees.json."""
+    valid, err = validate_employee_id(employee_id)
+    if not valid:
+        raise ValueError(err)
+
+    records = load_registry()
+    target_name = name.strip() if name and name.strip() else f"Employee {employee_id}"
+    target_file = embedding_file if embedding_file else f"{employee_id}_multiview_v2.npy"
+
+    existing_idx = None
+    for idx, r in enumerate(records):
+        if r.get("employeeId") == employee_id:
+            existing_idx = idx
+            break
+
+    record = {
+        "employeeId": employee_id,
+        "name": target_name,
+        "embeddingFile": target_file,
+        "status": status,
+    }
+
+    if existing_idx is not None:
+        records[existing_idx] = record
+    else:
+        records.append(record)
+
+    save_registry(records)
+    return record
+
+
+def remove_employee_safely(employee_id: str, clean_enrollment: bool = True) -> bool:
+    """Safely removes an employee from data/employees.json and deletes associated data files.
+
+    Guards:
+        EMP001 is permanently protected and cannot be deleted or overwritten.
+    """
+    valid, err = validate_employee_id(employee_id)
+    if not valid:
+        raise ValueError(err)
+
+    if employee_id.upper() in PROTECTED_EMPLOYEE_IDS:
+        raise PermissionError(f"{employee_id} is permanently protected and cannot be removed or overwritten.")
+
+    records = load_registry()
+    initial_len = len(records)
+    records = [r for r in records if r.get("employeeId") != employee_id]
+    save_registry(records)
+
+    # Clean embeddings
+    if EMBEDDINGS_DIR.exists():
+        for emb_file in EMBEDDINGS_DIR.glob(f"{employee_id}*.npy"):
+            try:
+                emb_file.unlink()
+            except Exception:
+                pass
+
+    # Clean enrollment images if requested
+    if clean_enrollment:
+        emp_enroll_dir = DATA_DIR / "enrollment" / employee_id
+        if emp_enroll_dir.exists():
+            for f in emp_enroll_dir.glob("*.*"):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+
+    return len(records) < initial_len
+
+
+# -----------------------------------------------------------------------------
+# Active Embeddings Store & Multi-Angle Tracking
+# -----------------------------------------------------------------------------
+
+def classify_view_tag(filename: str) -> str:
+    """Infers face viewing angle category ('FRONT', 'LEFT', 'RIGHT') from an embedding or photo filename."""
+    name_lower = filename.lower()
+    is_flip = "flip" in name_lower or "mirror" in name_lower
+    if "_left" in name_lower or "-left" in name_lower:
+        # A horizontally flipped left-profile represents the face turned to the RIGHT
+        return "RIGHT" if is_flip else "LEFT"
+    elif "_right" in name_lower or "-right" in name_lower:
+        # A horizontally flipped right-profile represents the face turned to the LEFT
+        return "LEFT" if is_flip else "RIGHT"
+    elif "_front" in name_lower or "-front" in name_lower or "multiview" in name_lower:
+        return "FRONT"
+    return "FRONT"
+
+
+def load_all_active_embeddings() -> Dict[str, Dict[str, Any]]:
+    """Loads all active employee embeddings into memory.
+
+    Discovers primary embedding and any additional authorized multi-view or multi-photo
+    embeddings for each employee (e.g., front, left, right profile).
+
+    Returns:
+        Dict mapping employeeId -> {
+            'employeeId': str,
+            'name': str,
+            'embedding': np.ndarray (512,),      # Primary canonical embedding
+            'embeddings': List[np.ndarray],      # All authorized embeddings for this employee
+            'views': List[str],                  # View tags ('FRONT', 'LEFT', 'RIGHT')
+            'view_embeddings': Dict[str, np.ndarray], # Map view tag -> embedding
+            'embeddingFile': str,
+            'status': str
+        }
+    """
+    records = load_registry()
+    embeddings_map: Dict[str, Dict[str, Any]] = {}
+
+    for r in records:
+        if r.get("status") != "active":
+            continue
+
+        emp_id = r.get("employeeId")
+        file_name = r.get("embeddingFile")
+        if not emp_id or not file_name:
+            continue
+
+        file_path = EMBEDDINGS_DIR / file_name
+        # Fallback resolution if file was renamed or v2 preferred
+        if not file_path.exists():
+            fallback_v2 = EMBEDDINGS_DIR / f"{emp_id}_multiview_v2.npy"
+            fallback_v1 = EMBEDDINGS_DIR / f"{emp_id}.npy"
+            if fallback_v2.exists():
+                file_path = fallback_v2
+            elif fallback_v1.exists():
+                file_path = fallback_v1
+            else:
+                continue
+
+        primary_emb: Optional[np.ndarray] = None
+        authorized_embeddings: List[np.ndarray] = []
+        authorized_views: List[str] = []
+        view_map: Dict[str, np.ndarray] = {}
+
+        # 1. Load primary file
+        try:
+            raw_data = np.load(str(file_path))
+            p_view = classify_view_tag(file_path.name)
+            if raw_data.ndim == 1 and raw_data.shape == (512,):
+                norm = float(np.linalg.norm(raw_data))
+                if norm > 0 and not np.isnan(norm):
+                    primary_emb = raw_data / norm
+                    authorized_embeddings.append(primary_emb)
+                    authorized_views.append(p_view)
+                    view_map[p_view] = primary_emb
+            elif raw_data.ndim == 2 and raw_data.shape[1] == 512:
+                for row in raw_data:
+                    norm = float(np.linalg.norm(row))
+                    if norm > 0 and not np.isnan(norm):
+                        n_row = row / norm
+                        authorized_embeddings.append(n_row)
+                        authorized_views.append(p_view)
+                        if p_view not in view_map:
+                            view_map[p_view] = n_row
+                if authorized_embeddings:
+                    primary_emb = authorized_embeddings[0]
+        except Exception as ex:
+            print(f"[Warning] Failed loading primary embedding for {emp_id} from {file_path}: {ex}")
+
+        # 2. Discover any additional authorized multi-view/multi-photo files for this employee
+        if EMBEDDINGS_DIR.exists():
+            for alt_file in sorted(EMBEDDINGS_DIR.glob(f"{emp_id}*.npy")):
+                if alt_file.resolve() == file_path.resolve():
+                    continue
+                try:
+                    alt_data = np.load(str(alt_file))
+                    alt_view = classify_view_tag(alt_file.name)
+                    if alt_data.ndim == 1 and alt_data.shape == (512,):
+                        norm = float(np.linalg.norm(alt_data))
+                        if norm > 0 and not np.isnan(norm):
+                            normed = alt_data / norm
+                            # Avoid duplicates
+                            if not any(np.allclose(normed, existing, atol=1e-4) for existing in authorized_embeddings):
+                                authorized_embeddings.append(normed)
+                                authorized_views.append(alt_view)
+                                if alt_view not in view_map:
+                                    view_map[alt_view] = normed
+                    elif alt_data.ndim == 2 and alt_data.shape[1] == 512:
+                        for row in alt_data:
+                            norm = float(np.linalg.norm(row))
+                            if norm > 0 and not np.isnan(norm):
+                                normed = row / norm
+                                if not any(np.allclose(normed, existing, atol=1e-4) for existing in authorized_embeddings):
+                                    authorized_embeddings.append(normed)
+                                    authorized_views.append(alt_view)
+                                    if alt_view not in view_map:
+                                        view_map[alt_view] = normed
+                except Exception:
+                    pass
+
+        if primary_emb is None and authorized_embeddings:
+            primary_emb = authorized_embeddings[0]
+
+        if primary_emb is not None:
+            embeddings_map[emp_id] = {
+                "employeeId": emp_id,
+                "name": r.get("name", emp_id),
+                "embedding": primary_emb,
+                "embeddings": authorized_embeddings,
+                "views": authorized_views,
+                "view_embeddings": view_map,
+                "embeddingFile": file_path.name,
+                "status": "active",
+            }
+
+    return embeddings_map
+
+
+def match_probe_against_registry(
+    probe_emb: np.ndarray,
+    active_employees: Dict[str, Dict[str, Any]],
+    recognition_threshold: float,
+    min_match_margin: float = 0.04,
+    profile_recognition_threshold: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Matches a 512-D probe embedding against all active employees.
+
+    Compares against all authorized multi-angle embeddings per employee and selects highest similarity.
+    Tracks which view ('FRONT', 'LEFT', 'RIGHT') generated the best match.
+    Applies Top-1 vs Top-2 ambiguity guard to prevent misidentifications.
+    """
+    if not active_employees:
+        return {
+            "status": "NO_REGISTERED_EMPLOYEES",
+            "employee_id": None,
+            "name": None,
+            "similarity": None,
+            "matched_view": None,
+            "margin": 0.0,
+            "rankings": [],
+        }
+
+    norm = float(np.linalg.norm(probe_emb))
+    if norm <= 0.0 or np.isnan(norm):
+        return {
+            "status": "INVALID_PROBE",
+            "employee_id": None,
+            "name": None,
+            "similarity": None,
+            "matched_view": None,
+            "margin": 0.0,
+            "rankings": [],
+        }
+
+    normed_probe = probe_emb / norm if not np.isclose(norm, 1.0, atol=1e-3) else probe_emb
+
+    rankings: List[Dict[str, Any]] = []
+    for emp_id, data in active_employees.items():
+        auth_embs = data.get("embeddings") or [data.get("embedding")]
+        auth_views = data.get("views") or ["FRONT"] * len(auth_embs)
+        max_sim = -1.0
+        best_view = "FRONT"
+        best_prof_sim = -1.0
+        best_prof_view = "LEFT"
+        for idx, ref in enumerate(auth_embs):
+            if ref is not None:
+                sim = float(np.dot(normed_probe, ref))
+                v_tag = auth_views[idx] if idx < len(auth_views) else "FRONT"
+                if sim > max_sim:
+                    max_sim = sim
+                    best_view = v_tag
+                if v_tag in ("LEFT", "RIGHT", "PROFILE") and sim > best_prof_sim:
+                    best_prof_sim = sim
+                    best_prof_view = v_tag
+        rankings.append({
+            "employeeId": emp_id,
+            "name": data.get("name", emp_id),
+            "similarity": max_sim,
+            "matched_view": best_view,
+            "profile_similarity": best_prof_sim,
+            "profile_view": best_prof_view,
+        })
+
+    rankings.sort(key=lambda x: x["similarity"], reverse=True)
+
+    top1 = rankings[0]
+    top1_sim = top1["similarity"]
+    top1_view = top1.get("matched_view", "FRONT")
+    top2_sim = rankings[1]["similarity"] if len(rankings) > 1 else -1.0
+    margin = (top1_sim - top2_sim) if len(rankings) > 1 else 1.0
+
+    # Recognition decision with profile-aware adaptive threshold:
+    # 1. Frontal / primary match if similarity >= recognition_threshold
+    # 2. Profile fallback: if below frontal threshold, genuine side/turning views (0.50 - 0.70)
+    #    are accepted if matching authorized profile references with healthy candidate margin.
+    prof_thresh = (
+        profile_recognition_threshold
+        if profile_recognition_threshold is not None
+        else PROFILE_RECOGNITION_THRESHOLD
+    )
+
+    if top1_sim >= recognition_threshold:
+        effective_thresh = recognition_threshold
+        effective_margin = min_match_margin
+    else:
+        is_profile = (
+            top1_view in ("LEFT", "RIGHT", "PROFILE")
+            or top1.get("profile_similarity", -1.0) >= prof_thresh
+        )
+        if is_profile:
+            effective_thresh = prof_thresh
+            effective_margin = max(min_match_margin, 0.08)
+            if top1_view not in ("LEFT", "RIGHT", "PROFILE"):
+                top1_view = top1.get("profile_view", "LEFT")
+        else:
+            effective_thresh = recognition_threshold
+            effective_margin = min_match_margin
+
+    if top1_sim < effective_thresh:
+        status = "UNKNOWN"
+        emp_id = None
+        emp_name = None
+        matched_view = None
+    elif len(rankings) > 1 and margin < effective_margin and top2_sim >= (effective_thresh - 0.08):
+        status = "AMBIGUOUS"
+        emp_id = None
+        emp_name = None
+        matched_view = None
+    else:
+        status = f"RECOGNIZED: {top1['employeeId']}"
+        emp_id = top1["employeeId"]
+        emp_name = top1["name"]
+        matched_view = top1_view
+
+    return {
+        "status": status,
+        "employee_id": emp_id,
+        "name": emp_name,
+        "similarity": top1_sim,
+        "matched_view": matched_view,
+        "second_candidate": rankings[1]["employeeId"] if len(rankings) > 1 else None,
+        "second_similarity": top2_sim if len(rankings) > 1 else None,
+        "margin": margin,
+        "rankings": rankings,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Duplicate Registration Checking
+# -----------------------------------------------------------------------------
+
+def check_duplicate_face(
+    candidate_embedding: np.ndarray,
+    exclude_id: Optional[str] = None,
+    threshold: float = DUPLICATE_REGISTRATION_THRESHOLD,
+) -> Tuple[bool, Optional[str], Optional[str], float]:
+    """Compares candidate embedding against all other registered employee embeddings.
+
+    Supports both 1D (single vector) and 2D (multi-view vectors) candidate arrays.
+
+    Args:
+        candidate_embedding: 512-D L2-normalized embedding or array of embeddings.
+        exclude_id: Optional employeeId to ignore (when updating existing employee).
+        threshold: Duplicate warning similarity threshold (default: 0.75).
+
+    Returns:
+        Tuple of (is_suspected_duplicate, closest_id, closest_name, similarity).
+    """
+    active_store = load_all_active_embeddings()
+    if not active_store:
+        return False, None, None, 0.0
+
+    # Ensure candidate_embeddings is a list of 1D normalized vectors
+    candidates: List[np.ndarray] = []
+    if candidate_embedding.ndim == 1:
+        c_norm = float(np.linalg.norm(candidate_embedding))
+        if c_norm > 0 and not np.isnan(c_norm):
+            candidates.append(candidate_embedding / c_norm if not np.isclose(c_norm, 1.0, atol=1e-3) else candidate_embedding)
+    elif candidate_embedding.ndim == 2:
+        for row in candidate_embedding:
+            r_norm = float(np.linalg.norm(row))
+            if r_norm > 0 and not np.isnan(r_norm):
+                candidates.append(row / r_norm if not np.isclose(r_norm, 1.0, atol=1e-3) else row)
+
+    if not candidates:
+        return False, None, None, 0.0
+
+    best_id = None
+    best_name = None
+    max_sim = -1.0
+
+    for emp_id, data in active_store.items():
+        if exclude_id and emp_id == exclude_id:
+            continue
+        auth_embs = data.get("embeddings") or [data["embedding"]]
+        for cand in candidates:
+            for existing_emb in auth_embs:
+                if existing_emb is not None:
+                    sim = float(np.dot(cand, existing_emb))
+                    if sim > max_sim:
+                        max_sim = sim
+                        best_id = emp_id
+                        best_name = data["name"]
+
+    is_duplicate = (max_sim >= threshold) and (best_id is not None)
+    return is_duplicate, best_id, best_name, max_sim
+

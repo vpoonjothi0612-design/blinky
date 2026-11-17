@@ -1,0 +1,28 @@
+[Unit]
+Description=Production Dual-Camera Face Recognition Attendance Service (CAM-01: OUT | CAM-02: IN)
+Documentation=https://github.com/sanjay-dev12/Att-face-recogintion
+After=network.target network-online.target postgresql.service attendance-ai-api.service
+Wants=network-online.target
+PartOf=attendance.target
+
+[Service]
+Type=simple
+User=attendance
+Group=attendance
+WorkingDirectory=/opt/attendance/ai-services
+EnvironmentFile=/opt/attendance/ai-services/.env
+# Headless mode for server environment (no X11 / GUI display required)
+ExecStart=/opt/attendance/ai-services/.venv/bin/python src/face/dual_camera_live_face_recognition.py --headless
+Restart=always
+RestartSec=10s
+StartLimitIntervalSec=120s
+StartLimitBurst=4
+StandardOutput=journal
+StandardError=journal
+# Prevent duplicate processes through systemd single-unit management and lockfile
+KillMode=mixed
+TimeoutStopSec=15s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target attendance.target

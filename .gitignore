@@ -1,0 +1,77 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Generated debug files
+ai-services/data/debug/
+
+# Model weights
+*.pt
+*.pth
+*.onnx
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+# Runtime data
+logs/
+ai-services/data/ai_camera_status.json
+ai-services/data/debug/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Runtime logs
+*.log*.log
+
+# Camera snapshots and runtime data
+ai-services/data/
+ai-services/debug/
+ai-services/test-data/
+ai-services/backup_pre_verification/
+
+# Biometric images and employee data
+ai-services/EMP*_multi_angle_photos/
+ai-services/EMP*_multi_angle_photos.zip
+ai-services/*.jpg
+ai-services/*.jpeg
+ai-services/*.png
+
+# Temporary databases and backups
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.bak_*
+
+# Expo temporary files
+**/.expo/
+
+# Editor backup files
+*~

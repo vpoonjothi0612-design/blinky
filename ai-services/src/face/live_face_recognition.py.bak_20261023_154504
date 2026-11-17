@@ -1,0 +1,919 @@
+"""Live Face Recognition Pipeline (Webcam -> YuNet -> Liveness -> ArcFace -> Attendance & Unknown Capture).
+
+=============================================================================
+LIVE PRODUCTION ATTENDANCE & RECOGNITION PIPELINE
+=============================================================================
+This script runs live webcam face recognition with end-to-end integration:
+1. Dynamically loads all registered employee embeddings from data/employees.json.
+2. Checks temporal 3D liveness before recognition to prevent photo/screen spoofing.
+3. ArcFace 512-D embedding extraction with cosine similarity matching against all employees.
+4. If similarity >= threshold (0.65):
+   - Sets status to RECOGNIZED: <EmployeeId>
+   - Calls backend Attendance API (POST http://localhost:3000/api/attendance) to record PRESENT
+   - HUD turns GREEN with candidate identity and attendance confirmation
+5. If similarity < threshold (< 0.65):
+   - Sets status to UNKNOWN FACE
+   - Saves face crop to data/unknown/unknown_<timestamp>.jpg
+   - Calls Unknown Faces API (POST http://localhost:3000/api/face-enrollments/capture-unknown)
+     to log photo & timestamp on the frontend Unknown Faces dashboard
+   - HUD turns RED
+=============================================================================
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+import uuid
+from collections import deque
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
+
+import cv2
+import numpy as np
+import requests
+from insightface.model_zoo import get_model
+
+
+# -----------------------------------
+# Configuration & Paths
+# -----------------------------------
+
+EMPLOYEE_ID = "EMP001"
+
+# Base directory for ai-services
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+_FACE_DIR = Path(__file__).resolve().parent
+if str(_FACE_DIR) not in sys.path:
+    sys.path.append(str(_FACE_DIR))
+
+_REC_DIR = _FACE_DIR / "recognition"
+if str(_REC_DIR) not in sys.path:
+    sys.path.append(str(_REC_DIR))
+
+_CAM_DIR = BASE_DIR / "src" / "camera"
+if str(_CAM_DIR) not in sys.path:
+    sys.path.append(str(_CAM_DIR))
+
+try:
+    from camera_config import get_camera_config, sanitize_rtsp_url, get_available_camera_configs
+    from camera_worker import CameraWorker
+except ImportError:
+    from src.camera.camera_config import get_camera_config, sanitize_rtsp_url, get_available_camera_configs
+    from src.camera.camera_worker import CameraWorker
+
+from face_config import (
+    YUNET_MODEL_PATH,
+    ARCFACE_MODEL_PATH,
+    REFERENCE_POINTS,
+    EMBEDDINGS_DIR,
+    RECOGNITION_THRESHOLD,
+    LIVENESS_HISTORY_WINDOW as HISTORY_WINDOW,
+    LIVENESS_MIN_FRAMES_FOR_DECISION as MIN_FRAMES_FOR_LIVENESS,
+    LIVENESS_MIN_MOTION_THRESHOLD as MIN_MOTION_THRESHOLD,
+    LIVENESS_MAX_MOTION_THRESHOLD as MAX_MOTION_THRESHOLD,
+    LIVENESS_MIN_RATIO_VARIANCE as MIN_RATIO_VARIANCE,
+    LIVENESS_MIN_EYE_VARIANCE as MIN_EYE_VARIANCE,
+)
+
+try:
+    from employee_registry import load_all_active_embeddings, match_probe_against_registry
+except ImportError:
+    from src.face.recognition.employee_registry import load_all_active_embeddings, match_probe_against_registry
+
+_v2_path = EMBEDDINGS_DIR / f"{EMPLOYEE_ID}_multiview_v2.npy"
+REFERENCE_EMBEDDING_PATH = _v2_path if _v2_path.exists() else (EMBEDDINGS_DIR / f"{EMPLOYEE_ID}.npy")
+
+# Camera & Detection Settings
+CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", "0"))
+CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE") or os.environ.get("CAMERA_RTSP_URL") or os.environ.get("CAMERA_STREAM_URL") or CAMERA_INDEX
+SCORE_THRESHOLD = 0.5
+
+NMS_THRESHOLD = 0.3
+TOP_K = 5000
+
+BACKEND_API_URL = "http://localhost:3000/api"
+INTERNAL_AUTH_HEADER = {
+    "Authorization": "Bearer AI_SYSTEM_INTERNAL_TOKEN_V1",
+    "Content-Type": "application/json",
+}
+
+
+# -----------------------------------
+# STAGE 1: Face Preprocessing (Shared Module)
+# -----------------------------------
+
+try:
+    from insightface.utils import face_align
+except ImportError:
+    face_align = None
+
+try:
+    from face_preprocess import preprocess_face
+except ImportError:
+    try:
+        from src.face.recognition.face_preprocess import preprocess_face
+    except ImportError:
+        sys.path.append(str(Path(__file__).resolve().parent / "recognition"))
+        from face_preprocess import preprocess_face
+
+
+# -----------------------------------
+# STAGE 2: Temporal Liveness Tracker
+# -----------------------------------
+
+class TemporalLivenessTracker:
+    """Tracks consecutive frame temporal metrics to verify live human presence."""
+
+    def __init__(self, min_frames: int = 3):
+        self.min_frames = min_frames
+        self.history = deque(maxlen=HISTORY_WINDOW)
+        self.consecutive_live_frames = 0
+        self.is_live = False
+        self.live_hold_frames = 0
+
+    def reset(self):
+        self.history.clear()
+        self.consecutive_live_frames = 0
+        self.is_live = False
+        self.live_hold_frames = 0
+
+    def update(self, face_bbox: tuple, landmarks: np.ndarray, gray: np.ndarray) -> tuple[bool, str, float]:
+        bx, by, bw, bh = face_bbox
+        left_eye = landmarks[0]
+        right_eye = landmarks[1]
+        nose = landmarks[2]
+
+        centroid = np.array([bx + bw / 2.0, by + bh / 2.0], dtype=np.float32)
+        left_eye_to_nose = np.linalg.norm(left_eye - nose)
+        right_eye_to_nose = np.linalg.norm(right_eye - nose)
+        geom_ratio = float(left_eye_to_nose / (right_eye_to_nose + 1e-6))
+
+        left_intensity = self._eye_intensity(gray, left_eye)
+        right_intensity = self._eye_intensity(gray, right_eye)
+
+        current_frame_data = {
+            "centroid": centroid,
+            "geom_ratio": geom_ratio,
+            "left_eye": left_intensity,
+            "right_eye": right_intensity,
+            "time": time.time(),
+        }
+        self.history.append(current_frame_data)
+
+        if len(self.history) < self.min_frames:
+            # Immediate responsive validation for natural human face geometry
+            if bw >= 50 and bh >= 50 and 0.6 <= (bw / float(bh)) <= 1.5:
+                self.is_live = True
+                self.live_hold_frames = 0
+                return True, "LIVE", 0.05
+            return False, "CHECKING_LIVENESS", 0.0
+
+        # Compute Metrics across the historical window
+        centroids = np.array([f["centroid"] for f in self.history])
+        displacements = np.linalg.norm(np.diff(centroids, axis=0), axis=1)
+        mean_displacement = float(np.mean(displacements))
+        face_diag = np.sqrt(bw**2 + bh**2) + 1e-6
+        motion_score = float(mean_displacement / face_diag)
+
+        ratios = [f["geom_ratio"] for f in self.history]
+        ratio_variance = float(np.var(ratios))
+
+        left_eyes = [f["left_eye"] for f in self.history]
+        right_eyes = [f["right_eye"] for f in self.history]
+        eye_variance = float(np.var(left_eyes) + np.var(right_eyes))
+
+        # Decision Logic:
+        has_natural_micro_motion = (MIN_MOTION_THRESHOLD <= motion_score <= MAX_MOTION_THRESHOLD)
+        has_3d_rotation = (ratio_variance >= MIN_RATIO_VARIANCE)
+        has_eye_action = (eye_variance >= MIN_EYE_VARIANCE)
+
+        # Natural live motion confirmed
+        if (has_natural_micro_motion and (has_3d_rotation or has_eye_action)) or (has_3d_rotation and has_eye_action):
+            self.consecutive_live_frames += 1
+            if self.consecutive_live_frames >= 2:
+                self.is_live = True
+                self.live_hold_frames = 0
+                return True, "LIVE", motion_score
+            return False, "CHECKING_LIVENESS", motion_score
+        elif has_natural_micro_motion and self.is_live:
+            # Subtle ongoing live motion maintains confirmed LIVE status
+            self.live_hold_frames = 0
+            return True, "LIVE", motion_score
+
+        # If already confirmed LIVE, hold through subtle natural pauses (up to 20 frames)
+        if self.is_live and self.live_hold_frames < 20:
+            self.live_hold_frames += 1
+            return True, "LIVE", motion_score
+
+        # Rigid photo spoof detection
+        self.consecutive_live_frames = 0
+        self.is_live = False
+        self.live_hold_frames = 0
+        if len(self.history) >= HISTORY_WINDOW and (motion_score < (MIN_MOTION_THRESHOLD * 0.4) or (not has_3d_rotation and not has_eye_action)):
+            return False, "SPOOF / LIVENESS FAILED", motion_score
+        return False, "SPOOF / STATIC PHOTO", motion_score
+
+    def _eye_intensity(self, gray: np.ndarray, pt: np.ndarray) -> float:
+        x, y = int(pt[0]), int(pt[1])
+        h, w = gray.shape[:2]
+        r = 8
+        patch = gray[max(0, y - r):min(h, y + r), max(0, x - r):min(w, x + r)]
+        return float(patch.mean()) if patch.size > 0 else 0.0
+
+
+# -----------------------------------
+# STAGE 3: HUD Overlay Renderer
+# -----------------------------------
+
+def draw_hud(
+    frame: np.ndarray,
+    face_info: dict,
+    state: str,
+    liveness_status: str,
+    similarity: Optional[float],
+    candidate_id: Optional[str],
+    candidate_name: Optional[str],
+    attendance_status: str,
+    frame_idx: int,
+    unknown_count: int = 0,
+) -> np.ndarray:
+    """Renders informative status HUD on top of the live frame."""
+    canvas = frame.copy()
+
+    # Determine state color
+    if state.startswith("RECOGNIZED"):
+        color = (0, 220, 0)        # Green
+    elif state == "UNKNOWN FACE":
+        color = (0, 0, 255)        # Red
+    elif "UNCERTAIN" in state or "OBSERVING" in state:
+        color = (0, 165, 255)      # Orange
+    elif state == "RECOGNIZING":
+        color = (0, 200, 255)      # Yellow / Amber
+    elif state == "CHECKING_LIVENESS":
+        color = (255, 180, 0)      # Cyan / Light Blue
+    elif state == "NO_DECISION":
+        color = (0, 165, 255)      # Orange
+    else:
+        color = (180, 180, 180)    # Gray
+
+    # Draw face box and landmarks
+    if face_info.get("detected"):
+        bx, by, bw, bh = face_info["bbox"]
+        cv2.rectangle(canvas, (bx, by), (bx + bw, by + bh), color, 2)
+
+        landmarks = face_info["landmarks"]
+        for pt in landmarks:
+            cv2.circle(canvas, (int(pt[0]), int(pt[1])), 3, (0, 255, 255), -1)
+
+        tag = state
+        if candidate_id and similarity is not None and similarity >= RECOGNITION_THRESHOLD:
+            tag = f"{candidate_id} - PRESENT ({similarity:.2f})"
+        elif "UNCERTAIN" in state or "OBSERVING" in state:
+            tag = f"OBSERVING ({similarity:.2f})" if similarity is not None else "OBSERVING"
+        elif similarity is not None and similarity < RECOGNITION_THRESHOLD:
+            tag = f"UNKNOWN ({similarity:.2f})"
+            if unknown_count > 3:
+                tag += f" [>3x DETECTED!]"
+        cv2.putText(canvas, tag, (bx, max(22, by - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+
+    # Info banner panel
+    panel_h = 230 if unknown_count > 3 else 200
+    cv2.rectangle(canvas, (10, 10), (480, panel_h), (25, 25, 25), -1)
+    cv2.rectangle(canvas, (10, 10), (480, panel_h), (80, 80, 80), 1)
+
+    cv2.putText(canvas, f"STATE     : {state}", (25, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
+    cv2.putText(canvas, f"LIVENESS  : {liveness_status}", (25, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1)
+
+    cand_disp = f"{candidate_id or 'None'}"
+    if candidate_name:
+        cand_disp += f" ({candidate_name})"
+    cv2.putText(canvas, f"MATCH     : {cand_disp}", (25, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255) if candidate_id else (180, 180, 180), 1)
+
+    sim_str = f"{similarity:.4f}" if similarity is not None else "---"
+    cv2.putText(canvas, f"SIMILARITY: {sim_str} (Threshold: {RECOGNITION_THRESHOLD:.2f})", (25, 128), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255) if similarity is not None else (180, 180, 180), 1)
+
+    att_color = (0, 220, 0) if "PRESENT" in attendance_status else (180, 180, 180)
+    cv2.putText(canvas, f"ATTENDANCE: {attendance_status}", (25, 158), cv2.FONT_HERSHEY_SIMPLEX, 0.55, att_color, 2 if "PRESENT" in attendance_status else 1)
+    cv2.putText(canvas, f"Frame: {frame_idx}", (25, 188), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1)
+
+    if unknown_count > 3:
+        cv2.putText(canvas, f"ALERT: UNKNOWN DETECTED >3x ({unknown_count} times)", (25, 218), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
+
+    return canvas
+
+
+def draw_multi_person_hud(
+    frame: np.ndarray,
+    tracks_info: List[Dict[str, Any]],
+    camera_id: str,
+    event_type: str,
+    stats: Dict[str, Any],
+    fps: float = 0.0,
+    outbox_depth: int = 0,
+) -> np.ndarray:
+    """Renders bounding boxes and labels for multiple tracked people, plus camera telemetry banner."""
+    canvas = frame.copy()
+    h, w = canvas.shape[:2]
+
+    # 1. Draw each tracked face
+    for item in tracks_info:
+        bbox = item.get("bbox", (0, 0, 0, 0))
+        bx, by, bw, bh = bbox
+        if bw <= 0 or bh <= 0:
+            continue
+
+        status = item.get("status", "WAITING")
+        emp_id = item.get("employee_id")
+        emp_name = item.get("name")
+        sim = item.get("similarity")
+        tid = item.get("track_id", 0)
+        att_state = item.get("attendance_state", "")
+
+        # Color coding
+        if status.startswith("RECOGNIZED"):
+            color = (0, 220, 0)        # Green
+        elif "UNKNOWN" in status:
+            color = (0, 0, 255)        # Red
+        elif "AMBIGUOUS" in status or "UNCERTAIN" in status:
+            color = (0, 165, 255)      # Orange
+        elif "CHECKING" in status or "VERIFYING" in status:
+            color = (255, 180, 0)      # Cyan
+        elif "LOW_QUALITY" in status or "PARTIAL" in status:
+            color = (140, 140, 140)    # Gray
+        else:
+            color = (200, 200, 200)
+
+        # Draw bbox
+        cv2.rectangle(canvas, (bx, by), (bx + bw, by + bh), color, 2)
+
+        # Landmarks if available
+        landmarks = item.get("landmarks")
+        if landmarks is not None:
+            for pt in landmarks:
+                cv2.circle(canvas, (int(pt[0]), int(pt[1])), 2, (0, 255, 255), -1)
+
+        # Label tag above bounding box
+        if status.startswith("RECOGNIZED") and emp_id:
+            label = f"#{tid} {emp_id}"
+            if emp_name and emp_name != emp_id:
+                label += f" ({emp_name})"
+            m_view = item.get("matched_view")
+            if m_view:
+                label += f" [{m_view}]"
+            if sim is not None:
+                label += f" [{sim:.2f}]"
+            if "Recorded" in att_state:
+                label += f" - {event_type} REC"
+            elif "Cooldown" in att_state:
+                label += " [CD]"
+        elif "UNKNOWN" in status:
+            sim_str = f" [{sim:.2f}]" if sim is not None else ""
+            label = f"#{tid} UNKNOWN{sim_str}"
+        elif "AMBIGUOUS" in status:
+            label = f"#{tid} AMBIGUOUS"
+        elif "CHECKING" in status:
+            label = f"#{tid} LIVENESS..."
+        elif "LOW_QUALITY" in status:
+            label = f"#{tid} LOW QUALITY"
+        else:
+            label = f"#{tid} {status}"
+
+        # Draw label background for crisp legibility
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        tag_y1 = max(0, by - th - 8)
+        tag_y2 = max(th + 8, by)
+        cv2.rectangle(canvas, (bx, tag_y1), (bx + tw + 6, tag_y2), (20, 20, 20), -1)
+        cv2.rectangle(canvas, (bx, tag_y1), (bx + tw + 6, tag_y2), color, 1)
+        cv2.putText(canvas, label, (bx + 3, tag_y2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1)
+
+    # 2. Top Telemetry Banner
+    banner_h = 60
+    cv2.rectangle(canvas, (0, 0), (w, banner_h), (20, 20, 20), -1)
+    cv2.line(canvas, (0, banner_h), (w, banner_h), (60, 60, 60), 1)
+
+    # Camera Role & Status
+    banner_color = (0, 255, 0) if event_type == "IN" else (0, 165, 255)
+    cv2.putText(canvas, f"{camera_id} [{event_type}]", (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.65, banner_color, 2)
+
+    conn_state = stats.get("connection_status", "CONNECTED")
+    conn_color = (0, 220, 0) if conn_state == "CONNECTED" else (0, 165, 255)
+    cv2.putText(canvas, f"{conn_state}", (140, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.5, conn_color, 1)
+
+    fps_str = f"FPS: {fps:4.1f}"
+    lat_str = f"Lat: {stats.get('avg_latency_ms', 0):.0f}ms"
+    cv2.putText(canvas, f"{fps_str} | {lat_str}", (260, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    # Telemetry Counters line 2
+    active_faces = len(tracks_info)
+    rec_count = stats.get("registered_identified", 0)
+    unk_tracks = stats.get("unknown_tracks", 0)
+    att_events = stats.get("attendance_recorded", 0)
+    dup_prev = stats.get("duplicates_prevented", 0)
+
+    summary_text = (
+        f"Faces: {active_faces} | Rec: {rec_count} | Unk Tracks: {unk_tracks} | "
+        f"Events: {att_events} | CD Blk: {dup_prev} | Outbox: {outbox_depth}"
+    )
+    cv2.putText(canvas, summary_text, (12, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (220, 220, 220), 1)
+
+    return canvas
+
+
+
+# -----------------------------------
+# Main Pipeline Loop
+# -----------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Live Face Recognition & Attendance Pipeline")
+    parser.add_argument(
+        "--camera",
+        "-c",
+        default=os.environ.get("CAMERA_ID") or os.environ.get("CAMERA_SOURCE") or os.environ.get("CAMERA_RTSP_URL") or os.environ.get("CAMERA_INDEX", "0"),
+        help="Camera identifier: CAM-01, CAM-02, 0 (webcam), or RTSP URL (default: from .env or 0)",
+    )
+    args = parser.parse_args()
+    cam_target = str(args.camera).strip()
+
+    print("========================================")
+    print("LIVE FACE RECOGNITION & ATTENDANCE PIPELINE")
+    print("========================================")
+    print(f"Target Reference  : {EMPLOYEE_ID}")
+    print(f"Camera Source     : {cam_target}")
+    print(f"Threshold         : {RECOGNITION_THRESHOLD:.2f}")
+    print("Controls          : Press 'q' or ESC to exit")
+    print("========================================\n")
+
+    # 1. Verify and Load All Active Registered Embeddings
+    active_employees: Dict[str, Dict[str, Any]] = load_all_active_embeddings()
+    if not active_employees:
+        print("[Notice] No active employees in registry, falling back to reference file...")
+        if REFERENCE_EMBEDDING_PATH.exists():
+            ref_raw = np.load(str(REFERENCE_EMBEDDING_PATH)).flatten()
+            ref_norm = float(np.linalg.norm(ref_raw))
+            if ref_norm > 0:
+                ref_raw = ref_raw / ref_norm
+            active_employees[EMPLOYEE_ID] = {
+                "employeeId": EMPLOYEE_ID,
+                "name": "sanjay",
+                "embedding": ref_raw,
+                "status": "active"
+            }
+
+    print(f"Loaded {len(active_employees)} active registered employee embedding(s):")
+    for eid, edata in active_employees.items():
+        print(f"  - {eid}: {edata.get('name', 'N/A')} (File: {edata.get('embeddingFile', 'N/A')})")
+    print()
+
+    # 2. Verify Models
+    if not YUNET_MODEL_PATH.exists():
+        print(f"Error: YuNet model not found: {YUNET_MODEL_PATH}")
+        return
+    if not ARCFACE_MODEL_PATH.exists():
+        print(f"Error: ArcFace model not found: {ARCFACE_MODEL_PATH}")
+        return
+
+    # 3. Load ArcFace Model
+    print("Loading ArcFace model (w600k_r50)...")
+    arcface = get_model(str(ARCFACE_MODEL_PATH), providers=["CPUExecutionProvider"])
+    arcface.prepare(ctx_id=0)
+    print("ArcFace model loaded successfully.\n")
+
+    # 4. Open Camera (CP PLUS Worker or Direct OpenCV)
+    camera_worker: Optional[CameraWorker] = None
+    cap: Optional[cv2.VideoCapture] = None
+    init_frame = None
+
+    target_upper = cam_target.upper()
+    if target_upper in ("BOTH", "ALL"):
+        try:
+            from dual_camera_live_face_recognition import run_dual_camera_recognition
+            run_dual_camera_recognition()
+            return
+        except ImportError:
+            from src.face.dual_camera_live_face_recognition import run_dual_camera_recognition
+            run_dual_camera_recognition()
+            return
+
+    if target_upper in ("CAM-01", "CAM-02", "1", "2"):
+        try:
+            cfg = get_camera_config(target_upper)
+            print(f"Opening CP PLUS camera {cfg.camera_id}: {cfg.sanitized_url}...")
+            camera_worker = CameraWorker(config=cfg, auto_start=True)
+        except Exception as e:
+            print(f"Error loading camera config: {e}")
+            return
+    elif cam_target.startswith("rtsp://") or cam_target.startswith("rtsps://"):
+        print(f"Opening RTSP camera stream: {sanitize_rtsp_url(cam_target)}...")
+        camera_worker = CameraWorker(config=cam_target, camera_id="RTSP-CAM", auto_start=True)
+    else:
+        # Local device index (webcam)
+        cam_idx = int(cam_target) if cam_target.isdigit() else 0
+        print(f"Opening local webcam index {cam_idx}...")
+        cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(cam_idx)
+        if not cap.isOpened():
+            print(f"Error: Could not open local camera {cam_idx}.")
+            return
+
+    # Wait for initial frame
+    if camera_worker is not None:
+        print("Waiting for camera connection and first frame...")
+        wait_start = time.time()
+        while time.time() - wait_start < 10.0:
+            has_f, f, _, _ = camera_worker.get_latest_frame()
+            if has_f and f is not None:
+                init_frame = f
+                break
+            time.sleep(0.1)
+
+        if init_frame is None:
+            status = camera_worker.get_status()
+            print(f"Error: Could not read frame from camera worker ({status['state']}).")
+            if status.get("last_error"):
+                print(f"Diagnostic error: {status['last_error']}")
+            camera_worker.stop()
+            return
+    else:
+        ret, init_frame = cap.read()
+        if not ret or init_frame is None:
+            print("Error: Could not read frame from local camera.")
+            if cap:
+                cap.release()
+            return
+
+    cam_h, cam_w = init_frame.shape[:2]
+    print(f"Camera opened     : OK ({cam_w} x {cam_h})")
+
+    # 5. Initialize YuNet Detector
+    detector = cv2.FaceDetectorYN.create(
+        str(YUNET_MODEL_PATH),
+        "",
+        (cam_w, cam_h),
+        SCORE_THRESHOLD,
+        NMS_THRESHOLD,
+        TOP_K,
+    )
+    detector.setInputSize((cam_w, cam_h))
+    print("YuNet detector    : OK (score_threshold = 0.5)")
+    print("\nStarting recognition stream...\n")
+
+    liveness_tracker = TemporalLivenessTracker()
+
+    # Session Metrics & Throttle Tracking
+    total_frames = 0
+    face_detected_frames = 0
+    liveness_passed_count = 0
+    recognition_attempts = 0
+    similarity_scores = []
+
+    last_similarity: Optional[float] = None
+    last_candidate_id: Optional[str] = None
+    last_candidate_name: Optional[str] = None
+    current_state = "WAITING"
+    liveness_status = "WAITING"
+    attendance_status = "PENDING"
+
+    # Session-level encounter continuity tracking (bounded grace period for momentary drops)
+    session_last_matched_id: Optional[str] = None
+    session_last_matched_name: Optional[str] = None
+    session_grace_frames: int = 0
+    MAX_GRACE_FRAMES: int = 15  # Bounded grace (~1.0s at 15fps); uncertain frames kept distinct from confirmed identity
+
+    last_attendance_sent: Dict[str, float] = {}
+    last_unknown_sent: float = 0.0
+    recent_unknown_captures: List[Dict[str, Any]] = []
+    unknown_detection_count: int = 0
+
+    try:
+        while True:
+            if camera_worker is not None:
+                has_frame, frame, ts, f_idx = camera_worker.get_latest_frame()
+                if not has_frame or frame is None:
+                    time.sleep(0.01)
+                    continue
+            else:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    continue
+
+            total_frames += 1
+            h, w = frame.shape[:2]
+
+            # Fast detection downscale (target width 640 for rapid real-time tracking)
+            target_w = 640
+            if w > target_w:
+                det_scale = target_w / float(w)
+                det_w = target_w
+                det_h = int(h * det_scale)
+                det_frame = cv2.resize(frame, (det_w, det_h), interpolation=cv2.INTER_LINEAR)
+            else:
+                det_scale = 1.0
+                det_w, det_h = w, h
+                det_frame = frame
+
+            if (det_w, det_h) != (cam_w, cam_h):
+                cam_w, cam_h = det_w, det_h
+                detector.setInputSize((cam_w, cam_h))
+
+            # Fast face detection
+            _, raw_faces = detector.detect(det_frame)
+            face_info = {"detected": False}
+            face_crop = None
+            aligned_face = None
+
+            if raw_faces is None or len(raw_faces) == 0:
+                current_state = "WAITING"
+                liveness_status = "WAITING"
+                liveness_tracker.reset()
+                last_similarity = None
+                last_candidate_id = None
+                last_candidate_name = None
+                session_last_matched_id = None
+                session_last_matched_name = None
+                session_grace_frames = 0
+            else:
+                face_detected_frames += 1
+                faces = raw_faces.copy()
+                if det_scale != 1.0:
+                    inv_scale = 1.0 / det_scale
+                    faces[:, 0:4] *= inv_scale
+                    faces[:, 4:14] *= inv_scale
+
+                face = faces[0]
+                bx, by, bw, bh = map(int, face[0:4])
+                landmarks = face[4:14].reshape(5, 2)
+
+                # Safe face crop with padding for unknown snapshots and telemetry
+                pad = 20
+                cy1, cy2 = max(0, by - pad), min(h, by + bh + pad)
+                cx1, cx2 = max(0, bx - pad), min(w, bx + bw + pad)
+                face_crop = frame[cy1:cy2, cx1:cx2].copy()
+                if face_crop.size == 0:
+                    face_crop = frame[max(0, by):min(h, by + bh), max(0, bx):min(w, bx + bw)].copy()
+                if face_crop.size == 0:
+                    face_crop = frame.copy()
+
+                face_info = {
+                    "detected": True,
+                    "bbox": (bx, by, bw, bh),
+                    "landmarks": landmarks,
+                }
+
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                is_live, liveness_state_name, motion = liveness_tracker.update(
+                    (bx, by, bw, bh), landmarks, gray
+                )
+                liveness_status = liveness_state_name
+
+                if not is_live:
+                    current_state = "CHECKING_LIVENESS"
+                    last_similarity = None
+                else:
+                    liveness_passed_count += 1
+
+                    # Preprocess face region consistently with enrollment pipeline
+                    x1, y1 = max(0, bx), max(0, by)
+                    x2, y2 = min(w, bx + bw), min(h, by + bh)
+                    face_box_crop = frame[y1:y2, x1:x2].copy()
+                    if face_box_crop.size > 0:
+                        try:
+                            enhanced_crop = preprocess_face(face_box_crop)
+                            working_frame = frame.copy()
+                            working_frame[y1:y2, x1:x2] = enhanced_crop
+                        except Exception:
+                            working_frame = frame
+                    else:
+                        working_frame = frame
+
+                    # Canonical ArcFace 112x112 similarity alignment on preprocessed frame
+                    if face_align is not None:
+                        aligned_face = face_align.norm_crop(working_frame, landmark=landmarks, image_size=112)
+                    else:
+                        transform, _ = cv2.estimateAffinePartial2D(
+                            landmarks.astype(np.float32),
+                            REFERENCE_POINTS,
+                            method=cv2.LMEDS,
+                        )
+                        aligned_face = cv2.warpAffine(working_frame, transform, (112, 112)) if transform is not None else None
+
+                    if aligned_face is not None:
+                        # ArcFace 512-D embedding extraction
+                        raw_emb = arcface.get_feat(aligned_face).flatten()
+                        raw_norm = float(np.linalg.norm(raw_emb))
+
+                        if raw_norm > 0:
+                            live_emb = (raw_emb / raw_norm).flatten()
+                            live_norm = float(np.linalg.norm(live_emb))
+
+                            # 5. Multi-View Matching with Ambiguity Guard against ALL active registered employees
+                            decision = match_probe_against_registry(
+                                probe_emb=live_emb,
+                                active_employees=active_employees,
+                                recognition_threshold=RECOGNITION_THRESHOLD,
+                                min_match_margin=0.04,
+                                profile_recognition_threshold=RECOGNITION_THRESHOLD,
+                            )
+
+                            best_similarity = float(decision.get("similarity") or -1.0)
+                            best_cand_id = decision.get("employee_id")
+                            best_cand_name = decision.get("name")
+                            dec_status = decision.get("status", "UNKNOWN")
+                            matched_view = decision.get("matched_view") or "FRONT"
+
+                            recognition_attempts += 1
+                            similarity_scores.append(best_similarity)
+                            last_similarity = best_similarity
+                            last_candidate_id = best_cand_id
+                            last_candidate_name = best_cand_name
+
+                            now_time = time.time()
+
+                            # ----------------------------------------------------
+                            # RECOGNITION DECISION & ATTENDANCE / UNKNOWN RULE
+                            # ----------------------------------------------------
+                            if dec_status.startswith("RECOGNIZED") and best_cand_id:
+                                current_state = f"RECOGNIZED: {best_cand_id} [{matched_view}]"
+                                session_last_matched_id = best_cand_id
+                                session_last_matched_name = best_cand_name
+                                session_grace_frames = MAX_GRACE_FRAMES
+
+                                # Trigger Attendance API (60-sec cooldown per employee)
+                                if (now_time - last_attendance_sent.get(best_cand_id, 0)) > 60:
+                                    last_attendance_sent[best_cand_id] = now_time
+                                    try:
+                                        payload = {
+                                            "employeeId": best_cand_id,
+                                            "status": "PRESENT",
+                                            "eventType": "IN",
+                                            "similarity": round(float(best_similarity), 4),
+                                            "eventId": str(uuid.uuid4()),
+                                            "source": "AI_CAMERA",
+                                        }
+                                        resp = requests.post(
+                                            f"{BACKEND_API_URL}/attendance",
+                                            json=payload,
+                                            headers=INTERNAL_AUTH_HEADER,
+                                            timeout=3.0,
+                                        )
+                                        if resp.status_code in (200, 201):
+                                            attendance_status = f"PRESENT ({best_cand_id})"
+                                            print("\n=======================================================")
+                                            print(f"[ATTENDANCE SUCCESS] Marked PRESENT for {best_cand_id} ({best_cand_name})")
+                                            print(f"  Similarity: {best_similarity:.4f} (>= {RECOGNITION_THRESHOLD:.2f}) [View: {matched_view}]")
+                                            print(f"  Timestamp : {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                                            print("=======================================================\n")
+                                        else:
+                                            attendance_status = "PRESENT (Recorded)"
+                                            print(f"[Attendance Notice] {resp.status_code}: {resp.json().get('message', '')}")
+                                    except Exception as ex:
+                                        print(f"[Attendance Error] Failed to connect to backend: {ex}")
+                                else:
+                                    attendance_status = f"PRESENT ({best_cand_id})"
+
+                            elif session_last_matched_id is not None and session_grace_frames > 0:
+                                # Bounded grace period for transient uncertainty during ongoing verified encounter
+                                session_grace_frames -= 1
+                                current_state = "UNCERTAIN (OBSERVING)"
+                                last_candidate_id = session_last_matched_id
+                                last_candidate_name = session_last_matched_name
+                            else:
+                                # Genuine unrecognized face or session grace expired
+                                session_last_matched_id = None
+                                session_last_matched_name = None
+                                session_grace_frames = 0
+                                current_state = "UNKNOWN FACE"
+                                unknown_detection_count += 1
+
+                                # Trigger Auto-Capture Unknown Face API (15-sec per-person cooldown by embedding similarity)
+                                is_on_cooldown = False
+                                for item in recent_unknown_captures:
+                                    sim = float(np.dot(live_emb, item["embedding"]))
+                                    if sim >= 0.50:  # Same unknown person
+                                        if (now_time - item["time"]) < 15.0:
+                                            is_on_cooldown = True
+                                            break
+
+                                if not is_on_cooldown:
+                                    last_unknown_sent = now_time
+                                    # Update or add to recent_unknown_captures
+                                    matched_item = None
+                                    for item in recent_unknown_captures:
+                                        if float(np.dot(live_emb, item["embedding"])) >= 0.50:
+                                            matched_item = item
+                                            break
+                                    if matched_item is not None:
+                                        matched_item["time"] = now_time
+                                        matched_item["embedding"] = live_emb
+                                    else:
+                                        recent_unknown_captures.append({"embedding": live_emb, "time": now_time})
+
+                                    # Prune entries older than 60s
+                                    recent_unknown_captures = [it for it in recent_unknown_captures if (now_time - it["time"]) <= 60.0]
+
+                                    try:
+                                        unknown_dir = Path(BASE_DIR) / "data" / "unknown"
+                                        unknown_dir.mkdir(parents=True, exist_ok=True)
+                                        fname = f"unknown_{int(now_time * 1000)}.jpg"
+                                        fpath = unknown_dir / fname
+                                        crop_to_save = face_crop if (face_crop is not None and face_crop.size > 0) else aligned_face
+                                        if crop_to_save is not None and crop_to_save.size > 0:
+                                            cv2.imwrite(str(fpath), crop_to_save)
+
+                                        payload = {
+                                            "image": fname,
+                                            "visitCount": unknown_detection_count,
+                                            "embedding": live_emb.tolist(),
+                                            "metadata": {
+                                                "camera": "CAM-01 (IN)",
+                                                "location": "Main Entrance Gate",
+                                            }
+                                        }
+                                        resp = requests.post(
+                                            f"{BACKEND_API_URL}/face-enrollments/capture-unknown",
+                                            json=payload,
+                                            headers=INTERNAL_AUTH_HEADER,
+                                            timeout=2.0,
+                                        )
+                                        if resp.status_code in (200, 201):
+                                            print("\n-------------------------------------------------------")
+                                            if unknown_detection_count > 3:
+                                                print(f"🚨 [ALERT: UNKNOWN DETECTED > 3 TIMES] Repeated visitor #{unknown_detection_count}")
+                                            else:
+                                                print(f"[UNKNOWN CAPTURED] Auto-captured unknown face -> Unknown Faces dashboard")
+                                            print(f"  Photo Saved  : {fname}")
+                                            print(f"  Total Seen   : {unknown_detection_count} time(s)")
+                                            print(f"  Top Match    : {best_cand_id} ({best_similarity:.4f} < {RECOGNITION_THRESHOLD:.2f})")
+                                            print(f"  Timestamp    : {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                                            print("-------------------------------------------------------\n")
+                                        else:
+                                            print(f"[Unknown Notice] {resp.status_code}: {resp.text}")
+                                    except Exception as ex:
+                                        print(f"[Unknown Error] Failed to send unknown face: {ex}")
+
+                            # Debug telemetry output for recognition attempt
+                            print(f"Recognition attempt #{recognition_attempts}")
+                            print("-------------------------------")
+                            print(f"Status                  : {current_state}")
+                            if current_state == "UNKNOWN FACE":
+                                print(f"Unknown Count           : {unknown_detection_count}{' (ALERT: > 3 times)' if unknown_detection_count > 3 else ''}")
+                            print(f"Best Candidate          : {best_cand_id} ({best_cand_name})")
+                            print(f"Cosine similarity       : {best_similarity:.6f} (Threshold: {RECOGNITION_THRESHOLD:.2f})")
+                            print(f"Attendance Status       : {attendance_status}")
+                            if face_crop is not None and face_crop.size > 0:
+                                print(f"Face crop size          : {face_crop.shape[1]} x {face_crop.shape[0]}")
+                            if aligned_face is not None and aligned_face.size > 0:
+                                print(f"Aligned face size       : {aligned_face.shape[1]} x {aligned_face.shape[0]}")
+                            print("-------------------------------\n")
+
+            # Render display HUD
+            display_frame = draw_hud(
+                frame,
+                face_info,
+                current_state,
+                liveness_status,
+                last_similarity,
+                last_candidate_id,
+                last_candidate_name,
+                attendance_status,
+                total_frames,
+                unknown_count=unknown_detection_count,
+            )
+
+            cv2.imshow("Live Face Recognition & Attendance Pipeline", display_frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q") or key == 27:
+                break
+
+    finally:
+        if camera_worker is not None:
+            camera_worker.stop()
+        if cap is not None:
+            cap.release()
+        cv2.destroyAllWindows()
+
+        avg_similarity = float(np.mean(similarity_scores)) if similarity_scores else 0.0
+
+        print("\n================================")
+        print("LIVE FACE RECOGNITION SUMMARY")
+        print("================================")
+        print(f"Frames processed     : {total_frames}")
+        print(f"Faces detected       : {face_detected_frames}")
+        print(f"Liveness passed      : {liveness_passed_count}")
+        print(f"Recognition attempts : {recognition_attempts}")
+        if similarity_scores:
+            print(f"Average similarity   : {avg_similarity:.6f}")
+        else:
+            print("Average similarity   : N/A")
+        print(f"Final state          : {current_state}")
+        print(f"Final attendance     : {attendance_status}")
+        print("================================")
+
+
+if __name__ == "__main__":
+    main()
