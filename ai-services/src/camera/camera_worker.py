@@ -105,6 +105,10 @@ class CameraWorker:
         self.last_successful_read_time: float = 0.0
         self.reconnect_count: int = 0
         self.last_error_message: str = ""
+        self._measured_fps: float = 0.0
+        self._fps_window_start: float = time.time()
+        self._fps_window_frames: int = 0
+        self._codec: str = "UNKNOWN"
 
         # Enforce RTSP-over-TCP via FFmpeg environment variable if using RTSP
         if isinstance(self.raw_source, str) and self.raw_source.startswith("rtsp"):
@@ -196,6 +200,8 @@ class CameraWorker:
             "source": self.sanitized_source,
             "connected": current_state == ConnectionState.CONNECTED,
             "resolution": f"{w}x{h}" if w > 0 else "N/A",
+            "fps": round(self._measured_fps, 2),
+            "codec": self._codec,
             "fps_frame_count": self.total_frames_received,
             "reconnect_count": self.reconnect_count,
             "last_frame_time": ts,
@@ -294,6 +300,11 @@ class CameraWorker:
                     self._latest_timestamp = time.time()
                     self._latest_frame_idx += 1
 
+                fourcc = int(cap.get(cv2.CAP_PROP_FOURCC)) if hasattr(cv2, "CAP_PROP_FOURCC") else 0
+                self._codec = "".join(
+                    chr((fourcc >> (8 * i)) & 0xFF) for i in range(4)
+                ).strip("\x00 ") if fourcc else "UNKNOWN"
+
                 self.total_frames_received += 1
                 self.last_successful_read_time = time.time()
                 self.consecutive_read_failures = 0
@@ -322,6 +333,12 @@ class CameraWorker:
                     self.consecutive_read_failures = 0
                     self.last_successful_read_time = now
                     self.total_frames_received += 1
+                    self._fps_window_frames += 1
+                    elapsed = now - self._fps_window_start
+                    if elapsed >= 1.0:
+                        self._measured_fps = self._fps_window_frames / elapsed
+                        self._fps_window_start = now
+                        self._fps_window_frames = 0
 
                     with self._frame_lock:
                         self._latest_frame = frame

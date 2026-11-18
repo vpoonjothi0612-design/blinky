@@ -270,9 +270,11 @@ class AIClient {
    *
    * @param {Buffer} fileBuffer - Face snapshot image buffer (JPEG/PNG).
    * @param {string} [originalFilename="camera-snapshot.jpg"] - Filename.
+   * @param {string} [cameraId="API"] - Camera or lookup source identifier.
+   * @param {Object} [options] - Optional recognition mode flags.
    * @returns {Promise<Object>} Face recognition results ({ success, facesDetected, results: [...] }).
    */
-  async recognizeFace(fileBuffer, originalFilename = "camera-snapshot.jpg", cameraId = "API") {
+  async recognizeFace(fileBuffer, originalFilename = "camera-snapshot.jpg", cameraId = "API", options = {}) {
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(`${this.baseUrl}/api/v1/face/recognize`);
       const boundary = "----NodeFormBoundary" + Math.random().toString(36).substring(2);
@@ -283,8 +285,15 @@ class AIClient {
           `Content-Type: image/jpeg\r\n\r\n`
       );
       const cameraPart = Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="camera_id"\r\n\r\n${cameraId}`);
+      const staticSearchPart = options.staticSearch
+        ? Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="static_search"\r\n\r\ntrue`)
+        : Buffer.alloc(0);
+      const includeFaceImagePart = options.includeFaceImage
+        ? Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="include_face_image"\r\n\r\ntrue`)
+        : Buffer.alloc(0);
       const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-      const payloadLength = header.length + fileBuffer.length + cameraPart.length + footer.length;
+      const payloadLength = header.length + fileBuffer.length + cameraPart.length +
+        staticSearchPart.length + includeFaceImagePart.length + footer.length;
 
       const req = http.request(
         {
@@ -340,6 +349,8 @@ class AIClient {
       req.write(header);
       req.write(fileBuffer);
       req.write(cameraPart);
+      if (staticSearchPart.length) req.write(staticSearchPart);
+      if (includeFaceImagePart.length) req.write(includeFaceImagePart);
       req.write(footer);
       req.end();
     });

@@ -28,6 +28,7 @@ const VehicleEdit = React.lazy(() => import('../modules/vehicle/VehicleEdit'));
 const VehicleDetails = React.lazy(() => import('../modules/vehicle/VehicleDetails'));
 const AttendanceList = React.lazy(() => import('../modules/attendance/AttendanceList'));
 const AttendanceDetails = React.lazy(() => import('../modules/attendance/AttendanceDetails'));
+const PhotoLog = React.lazy(() => import('../modules/attendance/PhotoLog'));
 const ReportDashboard = React.lazy(() => import('../modules/reports/ReportDashboard'));
 const ReportDetails = React.lazy(() => import('../modules/reports/ReportDetails'));
 const StaffSecurityList = React.lazy(() => import('../modules/staff-security/StaffSecurityList'));
@@ -383,6 +384,16 @@ const AppRoutes = () => {
           element={
             <ProtectedRoute allowedRoles={['ADMIN', 'STAFF', 'SECURITY', 'USER']}>
               <AttendanceDetails />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Employee photo log - ADMIN and SECURITY only */}
+        <Route
+          path="photo-log"
+          element={
+            <ProtectedRoute allowedRoles={['ADMIN', 'SECURITY']}>
+              <PhotoLog />
             </ProtectedRoute>
           }
         />

@@ -296,6 +296,7 @@ INTERNAL_TOKEN = os.environ.get("AI_INTERNAL_TOKEN", "AI_SYSTEM_INTERNAL_TOKEN_V
 COOLDOWN_SECONDS = float(os.environ.get("ATTENDANCE_COOLDOWN_SEC", "120.0"))
 OBSERVATION_CONFIRMATION_FRAMES = int(os.environ.get("CONFIRMATION_FRAMES", "1"))
 DEFAULT_MIN_MATCH_MARGIN = float(os.environ.get("MIN_MATCH_MARGIN", "0.04"))
+AI_PROCESS_INTERVAL_SEC = max(0.02, float(os.environ.get("AI_PROCESS_INTERVAL_MS", "33")) / 1000.0)
 
 
 def verify_backend_connectivity(api_url: str) -> bool:
@@ -687,6 +688,24 @@ class CameraInferenceWorker:
                     emp_id = ev.get('employeeId') or ev.get('employee_id')
                     ev_type = ev.get('eventType') or ev.get('event_type')
                     if emp_id and ev_type in ('PERSON_IN', 'PERSON_OUT'):
+                        now_epoch = time.time()
+                        duplicate_suppressed = False
+                        with SHARED_ATTENDANCE_LOCK:
+                            shared_record = SHARED_ATTENDANCE_CACHE.get(emp_id)
+                            if shared_record:
+                                elapsed = now_epoch - float(shared_record.get('timestamp_sec', 0.0))
+                                if elapsed < self.cooldown_seconds:
+                                    duplicate_suppressed = True
+                            if not duplicate_suppressed:
+                                SHARED_ATTENDANCE_CACHE[emp_id] = {
+                                    'timestamp_sec': now_epoch,
+                                    'date_str': datetime.now().strftime('%Y-%m-%d'),
+                                    'camera_id': self.camera_id,
+                                    'event_type': self.event_type,
+                                }
+                        if duplicate_suppressed:
+                            self.stats['duplicates_prevented'] = int(self.stats.get('duplicates_prevented', 0)) + 1
+                            continue
                         self.outbox.enqueue(
                             event_id=str(uuid.uuid4()),
                             employee_id=emp_id,
@@ -747,6 +766,9 @@ class CameraInferenceWorker:
                         self.latest_display_frame = fallback_hud
                 except Exception:
                     pass
+            remaining_interval = AI_PROCESS_INTERVAL_SEC - (time.perf_counter() - t_f0)
+            if remaining_interval > 0:
+                time.sleep(remaining_interval)
 
     def _evaluate_attendance_for_track(self, track: Any, capture_iso: str, raw_frame: Optional[np.ndarray] = None) -> None:
         """Evaluates direction-aware attendance cooldown and enqueues event to durable outbox.

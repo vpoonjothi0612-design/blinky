@@ -14,16 +14,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 // Register Service Worker safely without blocking React startup
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    const isSupportedHost = Boolean(
-      window.location.hostname === 'localhost' ||
-      window.location.hostname === '[::1]' ||
-      window.location.hostname.match(/^127\./) ||
-      window.location.hostname.match(/^192\.168\./) ||
-      window.location.hostname.match(/^10\./) ||
-      window.location.protocol === 'https:'
-    );
+    if (!import.meta.env.PROD) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+        .catch((error) => {
+          console.warn('[PWA] Could not unregister the development service worker (non-fatal):', error);
+        });
+      return;
+    }
 
-    if (import.meta.env.PROD || isSupportedHost) {
+    if (import.meta.env.PROD) {
       window.addEventListener('load', () => {
         navigator.serviceWorker
           .register('/sw.js', { scope: '/' })

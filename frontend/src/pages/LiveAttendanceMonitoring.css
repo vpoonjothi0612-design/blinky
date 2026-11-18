@@ -1929,6 +1929,19 @@
   color: #94a3b8;
 }
 
+.event-card-view-status {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fullscreen-mode .event-card-view-status {
+  color: #94a3b8;
+}
+
 .event-card-time {
   font-size: 0.72rem;
   font-weight: 700;

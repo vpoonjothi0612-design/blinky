@@ -109,7 +109,7 @@ MIN_FACE_DIM_ENROLL: int = 100
 MIN_SHARPNESS_ENROLL: float = 50.0
 
 # Live recognition quality gates (optimized for responsive 0.5m - 4.0m recognition)
-MIN_FACE_DIM_LIVE: int = int(os.environ.get("MIN_FACE_DIM_LIVE", "48"))
+MIN_FACE_DIM_LIVE: int = int(os.environ.get("MIN_FACE_DIM_LIVE", "64"))
 MIN_SHARPNESS_LIVE: float = float(os.environ.get("MIN_SHARPNESS_LIVE", "10.0"))
 MIN_SHARPNESS_LIVE_RELAXED: float = 6.0
 
@@ -127,11 +127,11 @@ EMBEDDING_DIM: int = 512
 
 # Operational decision threshold for cosine similarity
 # Note: 0.55 is the calibrated robust baseline for outdoor dual-camera surveillance.
-RECOGNITION_THRESHOLD: float = float(os.environ.get("RECOGNITION_THRESHOLD", "0.48"))
+RECOGNITION_THRESHOLD: float = float(os.environ.get("RECOGNITION_THRESHOLD", "0.55"))
 
 # Operational decision threshold for side profile face views (Left / Right views)
 # Profiles naturally exhibit 0.48 - 0.65 similarity while strangers score <= 0.15.
-PROFILE_RECOGNITION_THRESHOLD: float = float(os.environ.get("PROFILE_RECOGNITION_THRESHOLD", "0.48"))
+PROFILE_RECOGNITION_THRESHOLD: float = float(os.environ.get("PROFILE_RECOGNITION_THRESHOLD", "0.55"))
 
 # Top-1 vs Top-2 candidate ambiguity guard margin
 DEFAULT_MIN_MATCH_MARGIN: float = float(os.environ.get("MIN_MATCH_MARGIN", "0.05"))

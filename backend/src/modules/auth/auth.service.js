@@ -40,7 +40,7 @@ const register = async ({ name, email, password, role }) => {
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  let assignedRole = (role || "STAFF").toUpperCase();
+  let assignedRole = (role || "ADMIN").toUpperCase();
   if (assignedRole === "USER") assignedRole = "STAFF";
 
   const user = await authRepository.createUser({

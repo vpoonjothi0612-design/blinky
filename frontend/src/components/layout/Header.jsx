@@ -429,14 +429,6 @@ const Header = () => {
                       <span className="topbar-alarm-btn-icon">{isAlarmSoundOn ? '🔊' : '🔇'}</span>
                       <span>{isAlarmSoundOn ? 'Siren: Active' : 'Siren: Muted'}</span>
                     </button>
-                    <button
-                      type="button"
-                      className="topbar-alarm-test-btn"
-                      onClick={handleTestAlarm}
-                      title="Test alarm siren sound and phone vibration"
-                    >
-                      <span>🚨 Test Alarm</span>
-                    </button>
                   </div>
                 </div>
 

@@ -30,6 +30,26 @@ import { captureUnknownFace } from "../modules/face-enrollment/face-enrollment.s
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const UNKNOWN_DIR = path.resolve(__dirname, "../../../ai-services/data/unknown");
+const CAPTURES_DIR = path.resolve(__dirname, "../../../ai-services/data/captures");
+
+const saveRecognizedFaceImage = (imageBase64) => {
+  if (typeof imageBase64 !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) return null;
+  const imageBuffer = Buffer.from(imageBase64, "base64");
+  if (
+    imageBuffer.length < 4 ||
+    imageBuffer.length > 10 * 1024 * 1024 ||
+    imageBuffer[0] !== 0xff ||
+    imageBuffer[1] !== 0xd8 ||
+    imageBuffer[2] !== 0xff
+  ) {
+    return null;
+  }
+
+  const filename = `camera_${Date.now()}_${crypto.randomUUID()}.jpg`;
+  fs.mkdirSync(CAPTURES_DIR, { recursive: true });
+  fs.writeFileSync(path.join(CAPTURES_DIR, filename), imageBuffer, { flag: "wx" });
+  return filename;
+};
 
 class CameraEventListenerService {
   constructor() {
@@ -373,7 +393,12 @@ class CameraEventListenerService {
     // 2. Send snapshot to Python AI Face Recognition Service
     let recognitionResult;
     try {
-      recognitionResult = await aiClient.recognizeFace(snapshotBuffer, `camera_${Date.now()}.jpg`, `CAM-${cameraIp}`);
+      recognitionResult = await aiClient.recognizeFace(
+        snapshotBuffer,
+        `camera_${Date.now()}.jpg`,
+        `CAM-${cameraIp}`,
+        { includeFaceImage: true }
+      );
     } catch (err) {
       eventRecord.status = "AI_RECOGNITION_ERROR";
       eventRecord.note = `AI service error: ${err.message}`;
@@ -390,21 +415,42 @@ class CameraEventListenerService {
 
     // 3. Find registered camera ID in database if available
     let cameraId = null;
+    let cam = null;
     try {
-      const cam = await findCameraByName(`CP PLUS Camera (${cameraIp})`);
+      cam = await findCameraByName(`CP PLUS Camera (${cameraIp})`);
       if (cam) cameraId = cam.id;
-    } catch {}
+    } catch (err) {
+      console.warn(`[CameraListener] Could not resolve camera record: ${err.message}`);
+    }
 
     // 4. Process each face returned by AI service
     for (const face of recognitionResult.results) {
       if (face.status === "RECOGNIZED" && face.employeeId) {
         // Enrolled employee recognized -> Record Attendance
+        let capturedImage = null;
         try {
+          capturedImage = saveRecognizedFaceImage(face.faceImageBase64);
+          if (!capturedImage) {
+            console.warn("[CameraListener] AI response did not include a valid recognized-face crop.");
+          }
+        } catch (err) {
+          console.warn(`[CameraListener] Failed to save recognized-face image: ${err.message}`);
+        }
+
+        try {
+          const cameraName = cam ? cam.name : (cameraIp || "");
+          const eventType = /CAM-?01|192\.168\.15\.56|192\.168\.9\.207/i.test(cameraName)
+            ? "OUT"
+            : "IN";
           const attResult = await createAttendance({
             employeeId: face.employeeId,
             cameraId: cameraId,
             source: "AI_CAMERA",
             timestamp: new Date(),
+            eventType,
+            eventId: eventRecord.eventId,
+            similarity: face.similarity,
+            capturedImage,
           });
 
           if (attResult.created) {
@@ -415,6 +461,9 @@ class CameraEventListenerService {
               `[CameraListener] Attendance RECORDED for ${face.name || face.employeeId} via Camera ${cameraIp}`
             );
           } else {
+            if (capturedImage) {
+              fs.unlinkSync(path.join(CAPTURES_DIR, capturedImage));
+            }
             eventRecord.status = "ATTENDANCE_COOLDOWN";
             eventRecord.note = attResult.message;
             console.log(
@@ -422,6 +471,15 @@ class CameraEventListenerService {
             );
           }
         } catch (err) {
+          if (capturedImage) {
+            try {
+              fs.unlinkSync(path.join(CAPTURES_DIR, capturedImage));
+            } catch (cleanupError) {
+              if (cleanupError.code !== "ENOENT") {
+                console.warn(`[CameraListener] Failed to remove unlinked attendance image: ${cleanupError.message}`);
+              }
+            }
+          }
           console.error(`[CameraListener] Failed to save attendance:`, err.message);
         }
       } else {

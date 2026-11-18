@@ -20,6 +20,13 @@ import { findEmployeeByCode } from "../employee/employee.repository.js";
 import Employee from "../employee/employee.model.js";
 import { Op } from "sequelize";
 import sequelize from "../../config/database.js";
+import path from "node:path";
+import { aiClient } from "../../services/aiClient.service.js";
+import { resolvePhotoLogMatch } from "./photo-log-search.js";
+
+const PHOTO_SEARCH_MAX_BYTES = 10 * 1024 * 1024;
+const PHOTO_SEARCH_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+const PHOTO_SEARCH_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
 
 /**
  * Robust helper to resolve an Employee record for a STAFF user account.
@@ -84,6 +91,75 @@ export const create = async (req, res, next) => {
       message: result.message,
       data: result.data,
       created: result.created,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const searchPhotoLogByImage = async (req, res, next) => {
+  try {
+    const file = req.file;
+    if (Array.isArray(req.files) && req.files.length > 1) {
+      return res.status(400).json({ success: false, message: "Upload one image at a time." });
+    }
+    if (!file || !Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
+      return res.status(400).json({ success: false, message: "Choose an image to search." });
+    }
+
+    const extension = path.extname(file.originalname || "").toLowerCase();
+    const mimeType = String(file.mimetype || "").toLowerCase();
+    if (!PHOTO_SEARCH_EXTENSIONS.has(extension) || !PHOTO_SEARCH_MIME_TYPES.has(mimeType)) {
+      return res.status(400).json({ success: false, message: "Upload a JPG or PNG image." });
+    }
+    if (file.size > PHOTO_SEARCH_MAX_BYTES) {
+      return res.status(413).json({ success: false, message: "Image must be 10 MB or smaller." });
+    }
+
+    const recognition = await aiClient.recognizeFace(
+      file.buffer,
+      `photo-log-search${extension}`,
+      "PHOTO_LOG_SEARCH",
+      { staticSearch: true }
+    );
+    const match = resolvePhotoLogMatch(recognition);
+    if (!match.matched) {
+      return res.status(200).json({
+        success: true,
+        data: { matched: false, message: match.message },
+      });
+    }
+
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const employee = uuidPattern.test(match.employeeIdentifier)
+      ? await Employee.findByPk(match.employeeIdentifier)
+      : await findEmployeeByCode(match.employeeIdentifier);
+
+    if (!employee) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          matched: false,
+          message: "The recognized face is not linked to an employee record.",
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        matched: true,
+        employee: {
+          id: employee.id,
+          employeeCode: employee.employeeCode,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+          department: employee.department,
+          designation: employee.designation,
+          status: employee.status,
+        },
+        similarity: match.similarity,
+      },
     });
   } catch (error) {
     next(error);

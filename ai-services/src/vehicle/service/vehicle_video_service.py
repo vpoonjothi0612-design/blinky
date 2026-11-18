@@ -82,6 +82,12 @@ from vehicle.plate.plate_recognizer import (
     BaseOCREngine,
     PaddleOCREngine,
 )
+from view_classification import (
+    BestViewCaptureRegistry,
+    VEHICLE_CAPTURE_ANGLES,
+    normalize_confidence,
+    normalize_vehicle_angle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -165,11 +171,21 @@ class TrackedVehicleRecord:
     plate_crop_base64: Optional[str] = None
     best_raw_crop: Optional[Any] = None
     best_crop_area: int = 0
+    view_angle: str = "UNKNOWN"
+    view_angle_confidence: Optional[float] = None
+    best_angle_images: BestViewCaptureRegistry = field(
+        default_factory=lambda: BestViewCaptureRegistry(VEHICLE_CAPTURE_ANGLES),
+        repr=False,
+    )
+
+    def consider_angle_image(self, angle: object, image_path: object, quality: object) -> bool:
+        return self.best_angle_images.consider(angle, image_path, quality)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes vehicle record strictly conforming to specification."""
         # Use crossing timestamp if available, else first seen timestamp
         v_ts = self.crossing_timestamp or self.first_seen_timestamp
+        view_angle = normalize_vehicle_angle(self.view_angle)
 
         return {
             "trackId": self.track_id,
@@ -187,6 +203,9 @@ class TrackedVehicleRecord:
             "bestBbox": self.best_bbox,
             "vehicleCrop": self.vehicle_crop_base64,
             "plateCrop": self.plate_crop_base64,
+            "viewAngle": view_angle,
+            "viewAngleConfidence": normalize_confidence(self.view_angle_confidence) if view_angle != "UNKNOWN" else None,
+            "angleImages": self.best_angle_images.paths(),
         }
 
 
@@ -610,6 +629,12 @@ class VehicleVideoAnalysisService:
                             rec.best_bbox = list(trk.bbox)
 
                     rec = vehicles_map[tid]
+                    rec.view_angle = normalize_vehicle_angle(getattr(trk, "view_angle", "UNKNOWN"))
+                    rec.view_angle_confidence = normalize_confidence(getattr(trk, "view_angle_confidence", None))
+                    track_angle_images = getattr(trk, "best_angle_images", None)
+                    if track_angle_images is not None:
+                        for angle, capture in track_angle_images.items().items():
+                            rec.consider_angle_image(angle, capture.get("path"), capture.get("quality"))
 
                     # Safe bounding box clamp
                     cx1 = max(0, min(width - 1, x1))

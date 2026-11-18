@@ -104,6 +104,9 @@ class VehicleLineCounter:
         confidence: float,
         bbox: Tuple[int, int, int, int],
         frame_idx: int,
+        view_angle: object = "UNKNOWN",
+        view_angle_confidence: object = None,
+        angle_images: object = None,
     ) -> DirectionType:
         """Checks if a vehicle track crossed the line between the previous and current frame.
 
@@ -170,6 +173,9 @@ class VehicleLineCounter:
                 confidence=confidence,
                 bbox=bbox,
                 frame_idx=frame_idx,
+                view_angle=view_angle,
+                view_angle_confidence=view_angle_confidence,
+                angle_images=angle_images,
             )
             self.crossed_track_ids[track_id] = direction
             self.events.append(event)
@@ -199,6 +205,8 @@ class VehicleLineCounter:
             centroid = trk.centroid
             conf = trk.confidence
             bbox = trk.bbox
+            angle_captures = getattr(trk, "best_angle_images", None)
+            angle_images = angle_captures.paths() if angle_captures is not None else {}
 
             direction = self.check_crossing(
                 track_id=tid,
@@ -207,6 +215,9 @@ class VehicleLineCounter:
                 confidence=conf,
                 bbox=bbox,
                 frame_idx=frame_idx,
+                view_angle=getattr(trk, "view_angle", "UNKNOWN"),
+                view_angle_confidence=getattr(trk, "view_angle_confidence", None),
+                angle_images=angle_images,
             )
             if direction != "NONE":
                 new_events.append(self.events[-1])

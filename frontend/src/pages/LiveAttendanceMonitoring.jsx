@@ -4,8 +4,10 @@ import api from '../services/api';
 import useAuth from '../hooks/useAuth';
 import Loader from '../components/common/Loader';
 import AuthenticatedMediaImage from '../components/common/AuthenticatedMediaImage';
+import LocalWebcamTestPanel from '../components/local/LocalWebcamTestPanel';
 import { mediaUrlForLegacyPath } from '../services/media.service';
 import { formatCrossingTime, recentCrossingHref } from '../utils/crossingView';
+import { resolveLiveViewStatus } from '../utils/liveViewStatus';
 import {
   triggerSecurityAlarm,
   stopSecurityAlarmSiren,
@@ -339,8 +341,21 @@ const LiveAttendanceMonitoring = () => {
       eventSource.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data && (data.type === 'GATE_EVENT' || data.event_type)) {
-            const ev = data;
+          if (data && (data.type === 'GATE_EVENT' || data.type === 'EMPLOYEE_RECOGNIZED' || data.event_type)) {
+            const ev = data.type === 'EMPLOYEE_RECOGNIZED'
+              ? {
+                  ...data,
+                  id: data.eventId || data.attendanceId,
+                  event_type: data.eventType === 'OUT' ? 'PERSON_OUT' : 'PERSON_IN',
+                  direction: data.eventType,
+                  camera_id: data.cameraId,
+                  image_face_url: data.photoUrl,
+                  name: data.name,
+                  department: data.department,
+                  match_score: data.similarity,
+                  alarm: false,
+                }
+              : data;
             const isOut = ev.direction === 'OUT' || ev.camera_id?.includes('01');
 
             if (isOut) {
@@ -548,6 +563,8 @@ const LiveAttendanceMonitoring = () => {
           </button>
         </div>
       </header>
+
+      <LocalWebcamTestPanel />
 
       {/* ── MAIN DUAL CAMERA MONITOR VIEW ── */}
       <section className={`lam-dual-monitor-grid ${isFullscreen ? `fullscreen-${fullscreenCam.toLowerCase()}` : ''}`}>
@@ -844,6 +861,7 @@ const LiveAttendanceMonitoring = () => {
             ) : (
               inEvents.map((ev) => {
                 const badge = resolveBadgeInfo(ev.event_type);
+                const viewStatus = resolveLiveViewStatus(ev);
                 const photoUrl = getEventPhotoUrl(ev);
                 const isNew = newlyArrivedIds.has(ev.id);
 
@@ -864,6 +882,7 @@ const LiveAttendanceMonitoring = () => {
                         </span>
                       </div>
                       <div className="event-card-dept">{ev.department || ev.plate_text || (ev.species ? `Species: ${ev.species}` : 'Gate Area')}</div>
+                      {viewStatus && <div className="event-card-view-status">{viewStatus}</div>}
                       <div className="event-card-time">{crossingModeActive ? formatCrossingTime(ev.timestamp) : formatTimeIst(ev.timestamp)}</div>
                     </div>
                   </div>
@@ -892,6 +911,7 @@ const LiveAttendanceMonitoring = () => {
             ) : (
               outEvents.map((ev) => {
                 const badge = resolveBadgeInfo(ev.event_type);
+                const viewStatus = resolveLiveViewStatus(ev);
                 const photoUrl = getEventPhotoUrl(ev);
                 const isNew = newlyArrivedIds.has(ev.id);
 
@@ -912,6 +932,7 @@ const LiveAttendanceMonitoring = () => {
                         </span>
                       </div>
                       <div className="event-card-dept">{ev.department || ev.plate_text || (ev.species ? `Species: ${ev.species}` : 'Gate Area')}</div>
+                      {viewStatus && <div className="event-card-view-status">{viewStatus}</div>}
                       <div className="event-card-time">{crossingModeActive ? formatCrossingTime(ev.timestamp) : formatTimeIst(ev.timestamp)}</div>
                     </div>
                   </div>

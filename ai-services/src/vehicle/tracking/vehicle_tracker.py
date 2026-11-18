@@ -22,6 +22,20 @@ import numpy as np
 
 from ..detection.vehicle_classes import TARGET_VEHICLE_NAMES
 from ..detection.yolo_detector import YOLOVehicleDetector, CLASS_COLORS, DEFAULT_COLOR
+try:
+    from src.view_classification import (
+        BestViewCaptureRegistry,
+        VEHICLE_CAPTURE_ANGLES,
+        normalize_confidence,
+        normalize_vehicle_angle,
+    )
+except ModuleNotFoundError:
+    from view_classification import (
+        BestViewCaptureRegistry,
+        VEHICLE_CAPTURE_ANGLES,
+        normalize_confidence,
+        normalize_vehicle_angle,
+    )
 
 
 @dataclass
@@ -36,6 +50,21 @@ class VehicleTrack:
     first_seen_frame: int
     last_seen_frame: int
     centroid_history: deque = field(default_factory=lambda: deque(maxlen=40))
+    view_angle: str = "UNKNOWN"
+    view_angle_confidence: Optional[float] = None
+    best_angle_images: BestViewCaptureRegistry = field(
+        default_factory=lambda: BestViewCaptureRegistry(VEHICLE_CAPTURE_ANGLES),
+        repr=False,
+    )
+
+    def set_view_angle(self, angle: object, confidence: object = None) -> None:
+        self.view_angle = normalize_vehicle_angle(angle)
+        self.view_angle_confidence = (
+            normalize_confidence(confidence) if self.view_angle != "UNKNOWN" else None
+        )
+
+    def consider_angle_image(self, angle: object, image_path: object, quality: object) -> bool:
+        return self.best_angle_images.consider(angle, image_path, quality)
 
     @property
     def centroid(self) -> Tuple[int, int]:

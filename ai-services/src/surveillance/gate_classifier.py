@@ -32,6 +32,19 @@ import numpy as np
 import requests
 from ultralytics import YOLO
 
+_VIEW_CLASSIFICATION_DIR = Path(__file__).resolve().parents[1]
+if str(_VIEW_CLASSIFICATION_DIR) not in sys.path:
+    sys.path.insert(0, str(_VIEW_CLASSIFICATION_DIR))
+
+from view_classification import (
+    BestViewCaptureRegistry,
+    HUMAN_CAPTURE_ORIENTATIONS,
+    VEHICLE_CAPTURE_ANGLES,
+    normalize_confidence,
+    normalize_human_orientation,
+    normalize_vehicle_angle,
+)
+
 try:
     from src.vehicle.plate.plate_reader import PlateVoter
     from src.vehicle.plate import plate_config
@@ -77,7 +90,7 @@ YOLO_MODEL_PATH = _AI_DIR / "models" / "yolo" / "yolo11n.pt"
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.35"))
 YOLO_FRAME_STRIDE = int(os.environ.get("YOLO_FRAME_STRIDE", "3"))
 YOLO_MAX_DIM = int(os.environ.get("YOLO_MAX_DIM", "960"))
-FACE_MIN_PX = int(os.environ.get("FACE_MIN_PX", "48"))
+FACE_MIN_PX = int(os.environ.get("FACE_MIN_PX", "64"))
 FACE_MIN_PX_BY_CAMERA = {
     "CAM-01": int(os.environ.get("FACE_MIN_PX_CAM_01", str(FACE_MIN_PX))),
     "CAM-02": int(os.environ.get("FACE_MIN_PX_CAM_02", str(FACE_MIN_PX))),
@@ -282,6 +295,7 @@ class ObjectTrack:
         self.registry_revision: Optional[float] = None
         self.ever_in_gate: bool = False
         self.outside_gate_frames: int = 0
+        self.outside_gate_started: Optional[float] = None
         self.left_gate: bool = False
         self.last_body_crop: Optional[np.ndarray] = None
         self.last_body_crop_score: float = -1.0
@@ -295,6 +309,9 @@ class ObjectTrack:
         self.similarity: Optional[float] = None
         self.last_saved_face_fname: Optional[str] = None
         self.last_saved_quality: float = 0.0
+        self.human_orientation: str = "UNKNOWN"
+        self.human_orientation_confidence: Optional[float] = None
+        self.best_human_view_images = BestViewCaptureRegistry(HUMAN_CAPTURE_ORIENTATIONS)
 
         # Vehicle analysis cache (for VEHICLE)
         self.best_vehicle_crop: Optional[np.ndarray] = None
@@ -307,6 +324,9 @@ class ObjectTrack:
         self.last_plate_crop_source: Optional[str] = None
         self.last_plate_crop_score: float = -1.0
         self.last_saved_plate_fname: Optional[str] = None
+        self.vehicle_angle: str = "UNKNOWN"
+        self.vehicle_angle_confidence: Optional[float] = None
+        self.best_vehicle_angle_images = BestViewCaptureRegistry(VEHICLE_CAPTURE_ANGLES)
 
         # Animal cache (for ANIMAL)
         self.species: str = sub_label if initial_class == "ANIMAL" else "animal"
@@ -349,6 +369,38 @@ class ObjectTrack:
         self.face_state = state
         self.face_reason = reason
         self.face_rejection_history.append((state, reason))
+
+    def set_human_orientation(self, orientation: object, confidence: object = None) -> None:
+        self.human_orientation = normalize_human_orientation(orientation)
+        self.human_orientation_confidence = (
+            normalize_confidence(confidence) if self.human_orientation != "UNKNOWN" else None
+        )
+
+    def consider_human_view_image(self, orientation: object, image_path: object, quality: object) -> bool:
+        return self.best_human_view_images.consider(orientation, image_path, quality)
+
+    def set_vehicle_angle(self, angle: object, confidence: object = None) -> None:
+        self.vehicle_angle = normalize_vehicle_angle(angle)
+        self.vehicle_angle_confidence = (
+            normalize_confidence(confidence) if self.vehicle_angle != "UNKNOWN" else None
+        )
+
+    def consider_vehicle_angle_image(self, angle: object, image_path: object, quality: object) -> bool:
+        return self.best_vehicle_angle_images.consider(angle, image_path, quality)
+
+    def human_view_metadata(self) -> Dict[str, Any]:
+        return {
+            "humanOrientation": self.human_orientation,
+            "humanOrientationConfidence": self.human_orientation_confidence,
+            "humanAngleImages": self.best_human_view_images.paths(),
+        }
+
+    def vehicle_view_metadata(self) -> Dict[str, Any]:
+        return {
+            "vehicleAngle": self.vehicle_angle,
+            "vehicleAngleConfidence": self.vehicle_angle_confidence,
+            "vehicleAngleImages": self.best_vehicle_angle_images.paths(),
+        }
 
     def check_tripwire_crossing(self, tripwire_y: float, frame_h: int, expected_dir: str) -> bool:
         """Determines if object centroid crossed tripwire line in expected direction."""
@@ -550,7 +602,7 @@ class GateObjectClassifierPipeline:
             "imageFace": paths["face_passport_path"],
             "imageFrame": paths["frame_path"],
             "faceReason": reason_code,
-            "metadata": {**paths, "faceStatus": "NO_FACE_CAPTURED", "reason": reason_text},
+            "metadata": {**paths, "faceStatus": "NO_FACE_CAPTURED", "reason": reason_text, **track.human_view_metadata()},
             "alarm": False,
         }
         track.no_face_reported = True
@@ -570,7 +622,7 @@ class GateObjectClassifierPipeline:
 
     def _make_unknown_event(self, track: ObjectTrack, frame: Optional[np.ndarray] = None) -> Optional[Dict[str, Any]]:
         """Finalize a track as unknown only after repeated evaluated failures."""
-        if track.unknown_reported or len(track.face_identity_votes) < 3 or list(track.face_identity_votes).count(None) < 3:
+        if track.unknown_reported or len(track.face_identity_votes) < 3 or list(track.face_identity_votes).count("__UNKNOWN__") < 3:
             return None
         best = max((candidate for candidate in track.best_face_crops if candidate.evaluated and not str((candidate.result or {}).get("status", "")).startswith("RECOGNIZED")), key=lambda item: item.overall_quality, default=None)
         if best is None:
@@ -583,7 +635,7 @@ class GateObjectClassifierPipeline:
             "timestamp": track.last_body_timestamp or get_ist_now_iso(), "name": "Unknown Person",
             "department": "Unregistered Visitor", "matchScore": float((best.result or {}).get("similarity") or 0.0),
             "imageFace": paths["face_passport_path"], "imageFrame": paths["frame_path"],
-            "faceReason": "UNKNOWN", "metadata": paths, "alarm": True,
+            "faceReason": "UNKNOWN", "metadata": {**paths, **track.human_view_metadata()}, "alarm": True,
         }
         track.unknown_reported = True
         track.event_triggered = True
@@ -635,6 +687,7 @@ class GateObjectClassifierPipeline:
                             "direction": self.direction,
                             "bestScore": best_score,
                             "reason": track.face_reason,
+                            **track.human_view_metadata(),
                         },
                     },
                     headers={"Authorization": f"Bearer {INTERNAL_TOKEN}", "Content-Type": "application/json"},
@@ -661,6 +714,7 @@ class GateObjectClassifierPipeline:
                     "best_face_bbox": list(track.best_face_crops[0].bbox) if track.best_face_crops else None,
                     "face_observations": len(track.face_size_samples),
                     "evaluated_observations": track.face_evaluated_count,
+                    "human_orientation": track.human_orientation,
                 }
                 for track in self.tracks.values()
                 if track.stable_class == "PERSON"
@@ -955,10 +1009,18 @@ class GateObjectClassifierPipeline:
                 if is_in_gate:
                     track.ever_in_gate = True
                     track.outside_gate_frames = 0
+                    track.outside_gate_started = None
                 elif track.ever_in_gate and not track.left_gate:
                     track.outside_gate_frames += 1
-                    if track.outside_gate_frames >= 3:
+                    if track.outside_gate_started is None:
+                        track.outside_gate_started = time.time()
+                    elif time.time() - track.outside_gate_started >= 5.0:
                         track.left_gate = True
+                        track.outside_gate_started = None
+                    else:
+                        if track.face_state not in {"CONFIRMED", "UNKNOWN", "NO_FACE_CAPTURED"}:
+                            track.face_state = "EXIT_TRACKING"
+                            track.face_reason = "Temporarily outside the gate; exit confirmed after 5 seconds"
 
                 # Embed each retained high-scoring observation at most once. This
                 # makes the vote represent distinct frames while preserving the best
@@ -994,7 +1056,16 @@ class GateObjectClassifierPipeline:
                                 )
                             track.registry_revision = registry_revision
                         employee_id = result.get("employee_id") if str(result.get("status", "")).startswith("RECOGNIZED") else None
-                        track.face_identity_votes.append(employee_id)
+                        vote_status = str(result.get("status", "")).upper()
+                        if employee_id:
+                            vote = employee_id
+                        elif vote_status == "AMBIGUOUS":
+                            vote = "__AMBIGUOUS__"
+                        elif vote_status == "UNKNOWN":
+                            vote = "__UNKNOWN__"
+                        else:
+                            vote = "__DEFERRED__"
+                        track.face_identity_votes.append(vote)
                         similarity = float(result.get("similarity") or 0.0)
                         logger.info(
                             "[FaceDecision] camera=%s track=%s best=%.4f second=%s threshold=%s state=%s face_score=%.3f top3=%s",
@@ -1006,9 +1077,14 @@ class GateObjectClassifierPipeline:
                 for vote in track.face_identity_votes:
                     if vote:
                         identity_counts[vote] = identity_counts.get(vote, 0) + 1
-                confirmed_id = max(identity_counts, key=identity_counts.get) if identity_counts else None
+                employee_vote_counts = {
+                    vote: count
+                    for vote, count in identity_counts.items()
+                    if vote and not str(vote).startswith("__")
+                }
+                confirmed_id = max(employee_vote_counts, key=employee_vote_counts.get) if employee_vote_counts else None
                 confirmed = bool(confirmed_id and identity_counts[confirmed_id] >= 3)
-                unknown_confirmed = len(track.face_identity_votes) >= 3 and list(track.face_identity_votes).count(None) >= 3
+                unknown_confirmed = len(track.face_identity_votes) >= 3 and list(track.face_identity_votes).count("__UNKNOWN__") >= 3
                 should_finalize_unknown = track.left_gate or track.best_face_score >= FACE_EARLY_DECISION_SCORE
                 latest_candidate = next((candidate for candidate in track.best_face_crops if candidate.evaluated and candidate.result and candidate.result.get("employee_id") == confirmed_id), None) if confirmed_id else None
                 if latest_candidate is None:
@@ -1036,7 +1112,7 @@ class GateObjectClassifierPipeline:
                                 "name": track.employee_name, "department": track.department,
                                 "matchScore": float(rec_res.get("similarity") or 0.0), "match_score": float(rec_res.get("similarity") or 0.0),
                                 "imageFace": paths["face_passport_path"], "imageFrame": paths["frame_path"],
-                                "metadata": {**paths, "decision": "CONFIRMED"}, "alarm": False,
+                                "metadata": {**paths, "decision": "CONFIRMED", **track.human_view_metadata()}, "alarm": False,
                             }
                             generated_events.append(event_dict)
                             self._post_event_async(event_dict)
@@ -1056,7 +1132,7 @@ class GateObjectClassifierPipeline:
                                 "name": "Unknown Person", "department": "Unregistered Visitor",
                                 "matchScore": float((best_cand.result or {}).get("similarity") or 0.0),
                                 "imageFace": paths["face_passport_path"], "imageFrame": paths["frame_path"],
-                                "metadata": {**paths, "decision": "UNKNOWN"}, "alarm": True,
+                                "metadata": {**paths, "decision": "UNKNOWN", **track.human_view_metadata()}, "alarm": True,
                             }
                             generated_events.append(event_dict)
                             self._post_unknown_review_async(
@@ -1187,6 +1263,7 @@ class GateObjectClassifierPipeline:
                                 "image_plate_url": f"/vehicle-images/{track.last_saved_plate_fname}" if getattr(track, 'last_saved_plate_fname', None) else None,
                                 "imageFrame": frame_fname,
                                 "image_frame_url": f"/snapshot-images/{frame_fname}",
+                                "metadata": track.vehicle_view_metadata(),
                                 "alarm": False,
                             }
                             generated_events.append(event_dict)
@@ -1217,6 +1294,7 @@ class GateObjectClassifierPipeline:
                             "image_plate_url": f"/vehicle-images/{track.last_saved_plate_fname}" if getattr(track, 'last_saved_plate_fname', None) else None,
                             "imageFrame": frame_fname,
                             "image_frame_url": f"/snapshot-images/{frame_fname}",
+                            "metadata": track.vehicle_view_metadata(),
                             "alarm": False,
                         }
                         generated_events.append(event_dict)
@@ -1280,6 +1358,10 @@ class GateObjectClassifierPipeline:
                 "face_bbox": track.current_face_bbox if track.stable_class == "PERSON" else None,
                 "face_landmarks": track.current_face_landmarks.tolist() if track.stable_class == "PERSON" and track.current_face_landmarks is not None else None,
                 "best_face_score": round(float(track.best_face_score), 4) if track.stable_class == "PERSON" else None,
+                "human_orientation": track.human_orientation if track.stable_class == "PERSON" else None,
+                "human_orientation_confidence": track.human_orientation_confidence if track.stable_class == "PERSON" else None,
+                "vehicle_angle": track.vehicle_angle if track.stable_class == "VEHICLE" else None,
+                "vehicle_angle_confidence": track.vehicle_angle_confidence if track.stable_class == "VEHICLE" else None,
             })
 
         self._write_track_debug_snapshot()

@@ -6,6 +6,7 @@ import SurveillanceEvent from "../event/event.model.js";
 import Employee from "../employee/employee.model.js";
 import FaceEnrollment from "../face-enrollment/face-enrollment.model.js";
 import { mediaUrl, normalizeMediaPath } from "../media/media.service.js";
+import { mapViewMetadata } from "../event/view-metadata.js";
 
 const PERSON_EVENTS = ["PERSON_IN", "PERSON_OUT", "PERSON_UNKNOWN_IN", "PERSON_UNKNOWN_OUT", "NO_FACE_CAPTURED", "PERSON_NO_FACE"];
 const SUMMARY_TTL_MS = 2000;
@@ -107,6 +108,7 @@ export const mapCrossing = (value, photoOptions) => {
     body_url: bodyUrl,
     photo_url: photoUrl,
     photo_source: photoSource,
+    ...mapViewMetadata(metadata),
     reason: String(rawReason || (decision === "NO_FACE_CAPTURED" ? "No usable face was captured" : "" )).slice(0, 180),
     event_type: event.eventType,
   };

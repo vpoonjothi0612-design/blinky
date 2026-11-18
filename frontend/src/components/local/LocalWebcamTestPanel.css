@@ -1,0 +1,249 @@
+.local-webcam-test-panel {
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border: 1px solid #cfe7dd;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(13, 34, 30, 0.05);
+}
+
+.local-webcam-test-header,
+.local-webcam-test-content,
+.local-webcam-test-metrics {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-webcam-test-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.local-webcam-test-header p {
+  margin: 0.3rem 0 0;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.local-webcam-test-state {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.local-webcam-test-state.connected {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.local-webcam-test-state.offline {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.local-webcam-test-content {
+  margin-top: 0.9rem;
+}
+
+.local-webcam-test-preview {
+  flex: 1 1 58%;
+  min-width: 260px;
+  min-height: 220px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.local-webcam-test-preview img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+}
+
+.local-webcam-recognized {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.local-webcam-recognized h3 {
+  margin: 0 0 0.65rem;
+  color: #0f172a;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.local-webcam-recognized-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.local-webcam-employee-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 250px;
+  padding: 0.65rem;
+  border: 1px solid #cfe7dd;
+  border-radius: 10px;
+  background: #f8fffb;
+}
+
+.local-webcam-employee-card.unregistered {
+  border-color: #fecaca;
+  background: #fffafa;
+}
+
+.local-webcam-employee-card.uncertain {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.local-webcam-employee-photo,
+.local-webcam-employee-photo-placeholder {
+  flex: 0 0 78px;
+  width: 78px;
+  height: 104px;
+  border-radius: 7px;
+  object-fit: cover;
+  background: #e2e8f0;
+}
+
+.local-webcam-employee-photo-placeholder {
+  display: grid;
+  place-items: center;
+  padding: 0.25rem;
+  color: #64748b;
+  text-align: center;
+  font-size: 0.65rem;
+}
+
+.local-webcam-employee-details {
+  display: grid;
+  gap: 0.35rem;
+  color: #475569;
+  font-size: 0.75rem;
+}
+
+.local-webcam-employee-details strong {
+  color: #047857;
+  font-size: 0.85rem;
+}
+
+.local-webcam-employee-card.unregistered .local-webcam-employee-details strong {
+  color: #b91c1c;
+}
+
+.local-webcam-employee-card.uncertain .local-webcam-employee-details strong {
+  color: #92400e;
+}
+
+.local-webcam-test-placeholder {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 1rem;
+  color: #e2e8f0;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.local-webcam-test-placeholder code {
+  color: #a7f3d0;
+}
+
+.local-webcam-test-details {
+  flex: 1 1 42%;
+  min-width: 230px;
+}
+
+.local-webcam-test-metrics {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.local-webcam-test-metrics strong {
+  color: #0f172a;
+}
+
+.local-webcam-test-detections {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.local-webcam-detection {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  background: #f1f5f9;
+}
+
+.local-webcam-detection.recognized {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.local-webcam-detection.unknown {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.local-webcam-detection.low-quality,
+.local-webcam-detection.uncertain {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.local-webcam-test-empty,
+.local-webcam-test-note,
+.local-webcam-test-warning,
+.local-webcam-test-error {
+  display: block;
+  margin: 0.65rem 0 0;
+  font-size: 0.75rem;
+}
+
+.local-webcam-test-empty {
+  color: #64748b;
+}
+
+.local-webcam-test-note {
+  color: #047857;
+}
+
+.local-webcam-test-warning,
+.local-webcam-test-error {
+  color: #b91c1c;
+}
+
+@media (max-width: 760px) {
+  .local-webcam-test-content {
+    flex-direction: column;
+  }
+
+  .local-webcam-test-preview,
+  .local-webcam-test-details {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .local-webcam-test-header {
+    flex-direction: column;
+  }
+}

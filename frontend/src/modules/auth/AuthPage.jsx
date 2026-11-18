@@ -208,7 +208,7 @@ const AuthPage = ({ defaultMode = 'login' }) => {
     name: '',
     email: '',
     password: '',
-    role: 'STAFF',
+    role: 'ADMIN',
   });
   const [registerErrors, setRegisterErrors] = useState({});
   const [registerApiError, setRegisterApiError] = useState('');
@@ -301,11 +301,12 @@ const AuthPage = ({ defaultMode = 'login' }) => {
 
     setRegisterLoading(true);
     try {
-      const response = await registerApi(registerForm);
+      const registrationData = { ...registerForm, role: 'ADMIN' };
+      const response = await registerApi(registrationData);
       if (response?.data?.token && response?.data?.user) {
         // Automatically log in
         await login({ email: registerForm.email, password: registerForm.password });
-        navigate('/', { replace: true });
+        navigate('/dashboard', { replace: true });
       } else {
         setRegisterSuccess('Account created successfully! Switching to sign in...');
         setTimeout(() => {

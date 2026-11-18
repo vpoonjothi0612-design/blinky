@@ -142,6 +142,7 @@ const EmployeeCreate = () => {
       }
       videoRef.current.play().catch((err) => {
         console.warn('Video playback warning:', err);
+        setCameraError('The camera connected, but the browser could not start the video. Click Retry Permission.');
       });
     }
   }, [activeAngle, cameraActive]);
@@ -150,16 +151,26 @@ const EmployeeCreate = () => {
   const startCamera = async (targetAngle = 'front') => {
     setCameraError('');
     try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw Object.assign(new Error('Camera access is not available in this browser context.'), {
+          name: 'CAMERA_UNAVAILABLE',
+        });
+      }
+
       let stream = streamRef.current;
       if (!stream || !stream.active) {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: 'user',
-          },
+        const constraints = {
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: { ideal: 'user' } },
           audio: false,
-        });
+        };
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (cameraError) {
+          if (!['OverconstrainedError', 'ConstraintNotSatisfiedError'].includes(cameraError.name)) {
+            throw cameraError;
+          }
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
         streamRef.current = stream;
       }
 
@@ -172,10 +183,18 @@ const EmployeeCreate = () => {
         videoRef.current.play().catch(() => {});
       }
     } catch (err) {
-      console.error('Camera access error:', err);
-      setCameraError(
-        'Unable to access camera. Please allow camera permissions in your browser to proceed with face enrollment.'
-      );
+      console.error('Camera access error:', err.name, err.message);
+      const errorMessages = {
+        CAMERA_UNAVAILABLE: 'Camera access requires a supported browser on localhost or HTTPS.',
+        NotAllowedError: 'Camera permission is blocked. Allow camera access for this site in your browser settings, then click Retry Permission.',
+        PermissionDeniedError: 'Camera permission is blocked. Allow camera access for this site in your browser settings, then click Retry Permission.',
+        NotFoundError: 'No camera was found. Connect a camera and click Retry Permission.',
+        DevicesNotFoundError: 'No camera was found. Connect a camera and click Retry Permission.',
+        NotReadableError: 'The camera is already in use or unavailable. Close the local webcam test and other camera apps, then click Retry Permission.',
+        TrackStartError: 'The camera is already in use or unavailable. Close the local webcam test and other camera apps, then click Retry Permission.',
+        SecurityError: 'Camera access is blocked for this page. Open the app on localhost or HTTPS and allow camera permission.',
+      };
+      setCameraError(errorMessages[err.name] || 'Unable to start the camera. Check browser camera permission and close other apps using the camera, then retry.');
       setCameraActive(false);
     }
   };

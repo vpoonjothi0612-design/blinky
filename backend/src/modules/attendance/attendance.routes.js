@@ -11,9 +11,11 @@ import {
   getLiveStatsHandler,
   getLatestRecognitionHandler,
   getStoredPhotosHandler,
+  searchPhotoLogByImage,
 } from "./attendance.controller.js";
 
 import { authenticate, authorize } from "../auth/auth.middleware.js";
+import { uploadSingleImage } from "../../middleware/upload.middleware.js";
 
 const router = Router();
 
@@ -22,6 +24,15 @@ router.get("/live-stream", authenticate, getLiveStream);
 router.get("/live-stats", authenticate, getLiveStatsHandler);
 router.get("/latest-recognition", authenticate, getLatestRecognitionHandler);
 router.get("/stored-photos", authenticate, getStoredPhotosHandler);
+
+// Employee photo log lookup is limited to ADMIN and SECURITY accounts.
+router.post(
+  "/photo-log/search-by-image",
+  authenticate,
+  authorize("ADMIN", "SECURITY"),
+  uploadSingleImage,
+  searchPhotoLogByImage
+);
 
 // Manual Attendance Entry - ADMIN only
 router.post("/manual", authenticate, authorize("ADMIN"), createManual);

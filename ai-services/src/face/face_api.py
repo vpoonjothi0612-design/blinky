@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import json
+import base64
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -130,6 +131,8 @@ def delete_face_registry_entry(employee_id: str):
 async def recognize_face(
     file: UploadFile = File(..., description="Face image file (.jpg, .jpeg, .png)"),
     camera_id: str = Form("API"),
+    static_search: bool = Form(False),
+    include_face_image: bool = Form(False),
 ):
     """Processes an uploaded image through YuNet face detection & ArcFace recognition."""
     if not file or not file.filename:
@@ -165,12 +168,16 @@ async def recognize_face(
 
     service = get_face_service()
     # Process single static frame (liveness evaluated if enabled, disabled for static image)
-    results = service.process_frame(image, enable_liveness=False)
+    results = service.process_frame(
+        image,
+        enable_liveness=False,
+        use_track_policy=not static_search,
+    )
 
     formatted_results: List[Dict[str, Any]] = []
     for r in results:
         print(f"[FaceMatch] camera={camera_id} track={r.track_id} best={r.similarity} second={r.second_similarity} threshold={service.recognition_threshold} status={r.status}")
-        formatted_results.append({
+        formatted_result = {
             "employeeId": r.employee_id,
             "name": r.name,
             "status": r.status,
@@ -186,7 +193,26 @@ async def recognize_face(
             "trackId": r.track_id,
             "topCandidates": r.rankings[:3],
             "threshold": service.recognition_threshold,
-        })
+        }
+        if include_face_image and r.status == "RECOGNIZED" and r.employee_id:
+            x, y, width, height = (int(round(float(value))) for value in r.bbox)
+            if width > 0 and height > 0:
+                pad_x = max(8, int(width * 0.2))
+                pad_y = max(8, int(height * 0.25))
+                left = max(0, x - pad_x)
+                top = max(0, y - pad_y)
+                right = min(image.shape[1], x + width + pad_x)
+                bottom = min(image.shape[0], y + height + pad_y)
+                face_crop = image[top:bottom, left:right]
+                if face_crop.size:
+                    encoded_ok, encoded_crop = cv2.imencode(
+                        ".jpg",
+                        face_crop,
+                        [cv2.IMWRITE_JPEG_QUALITY, 90],
+                    )
+                    if encoded_ok:
+                        formatted_result["faceImageBase64"] = base64.b64encode(encoded_crop).decode("ascii")
+        formatted_results.append(formatted_result)
 
     return JSONResponse(status_code=200, content={
         "success": True,

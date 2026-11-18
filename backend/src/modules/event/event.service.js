@@ -7,6 +7,7 @@ import FaceEnrollment from "../face-enrollment/face-enrollment.model.js";
 import Camera from "../camera/camera.model.js";
 import { broadcastLiveEvent, createAttendance } from "../attendance/attendance.service.js";
 import { MEDIA_ROOT, mediaUrl, normalizeMediaPath, resolveMediaPath } from "../media/media.service.js";
+import { mapViewMetadata } from "./view-metadata.js";
 
 const INDIAN_PLATE = /^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{4}$/;
 const INDIAN_STATE_CODES = new Set("AP AR AS BR CG CH DD DL DN GA GJ HP HR JH JK KA KL LA LD MH ML MN MP MZ NL OD PB PY RJ SK TN TR TS UK UP WB".split(" "));
@@ -399,6 +400,7 @@ export const formatEventResponse = (event) => {
     image_frame_url: imageFrameUrl,
     profile_image_url: profileImageUrl,
     person_status: personStatus,
+    ...mapViewMetadata(raw.metadata || {}),
     alarm: Boolean(raw.alarm),
     created_at: raw.createdAt,
   };

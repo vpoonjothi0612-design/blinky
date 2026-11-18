@@ -712,7 +712,8 @@ class PlateVoter:
             text = final.get("plate_text") if final else None
             if text:
                 winner_count = sum(1 for item in self._results[track_id] if item.get("plate_text") == text)
-                if winner_count >= self.lock_count and final.get("status") in {"ok", "low_confidence"}:
+                confidence = float(final.get("confidence", 0.0))
+                if winner_count >= self.lock_count and final.get("status") == "ok" and confidence >= PLATE_MIN_VALID_CONFIDENCE:
                     self._locked[track_id] = dict(final)
             return final
 

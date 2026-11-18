@@ -1,0 +1,40 @@
+PORT=3000
+
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=attface
+DB_USER=postgres
+DB_PASSWORD=root@123
+
+JWT_SECRET=your_jwt_secret_key_here
+JWT_EXPIRES_IN=7d
+
+# Domain & CORS Configuration
+DOMAIN=https://facetrack.gldatacenter.com
+FRONTEND_URL=https://facetrack.gldatacenter.com
+API_BASE_URL=https://facetrack.gldatacenter.com/api
+
+# AI Service integration
+AI_SERVICE_URL=http://127.0.0.1:8000
+AI_SERVICE_TIMEOUT=30000
+AI_STREAM_URL=http://127.0.0.1:5055
+
+CAMERA_API_URL=http://192.168.15.57/cpapi/AlarmMaster?action=attach&codes=%5bFaceDetection%5d
+CAMERA_IP=192.168.15.57
+CAMERA_USERNAME=admin
+CAMERA_PASSWORD=
+CAMERA_CHANNEL=1
+CAMERA_AUTO_START=true
+CAMERA_RECONNECT_INTERVAL_MS=10000
+CAMERA_SNAPSHOT_URL=http://192.168.15.57/cgi-bin/snapshot.cgi?channel=1
+CAMERA_RTSP_URL=rtsp://192.168.15.57:554/cam/realmonitor?channel=1&subtype=0
+
+
+
+# Multi-Camera & NVR Mapping
+NVR_IP=192.168.15.55
+CAMERA_1_IP=192.168.15.56
+CAMERA_2_IP=192.168.15.57
+
+# Enable the additive camera-crossing API and review UI.
+FACE_CROSSING_MODE=true

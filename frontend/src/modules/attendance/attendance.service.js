@@ -14,6 +14,16 @@ export const getAttendanceByEmployee = async (employeeId, page = 1, limit = 50, 
   return response.data;
 };
 
+export const searchEmployeeByPhoto = async (image) => {
+  const formData = new FormData();
+  formData.append('image', image);
+  const response = await api.post('/attendance/photo-log/search-by-image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+  return response.data;
+};
+
 export const createAttendance = async (data) => {
   const response = await api.post('/attendance', data);
   return response.data;
@@ -27,6 +37,7 @@ export const createManualAttendance = async (data) => {
 export default {
   getAttendance,
   getAttendanceByEmployee,
+  searchEmployeeByPhoto,
   createAttendance,
   createManualAttendance,
 };

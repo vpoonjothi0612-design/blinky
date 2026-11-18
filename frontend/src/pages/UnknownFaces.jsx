@@ -264,18 +264,6 @@ const UnknownFaces = () => {
     setAccessStatus(getAlarmAccessStatus());
   };
 
-  const handleTestAlarm = () => {
-    const sample = faces[0] || {
-      id: 'test-alarm',
-      personName: 'Test Unrecognized Person',
-      createdAt: new Date().toISOString(),
-      camera: { name: 'CAM-02 (Entrance / IN)', location: 'Main Gate' },
-    };
-    triggerSecurityAlarm(sample, { isTest: true });
-    setActiveAlarmFace(sample);
-    setJustDetectedId(sample.id);
-  };
-
   const handleToggleAlarmSound = () => {
     const nextVal = !isAlarmSoundOn;
     setAlarmSoundEnabled(nextVal);
@@ -1138,15 +1126,6 @@ const UnknownFaces = () => {
             title={isAlarmSoundOn ? 'Security alarm siren is active - click to mute' : 'Security alarm siren is muted - click to enable'}
           >
             <span>{isAlarmSoundOn ? '🔊 Alarm: On' : '🔇 Alarm: Muted'}</span>
-          </button>
-
-          <button
-            type="button"
-            className="unrec-btn-alarm-test"
-            onClick={handleTestAlarm}
-            title="Test security siren audio and mobile phone vibration"
-          >
-            <span>🚨 Test Alarm</span>
           </button>
 
           <button

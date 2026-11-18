@@ -1,0 +1,678 @@
+.photo-log-page {
+  color: var(--text-primary, #0f172a);
+  display: grid;
+  gap: 22px;
+}
+
+.photo-log-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.photo-log-header h1,
+.photo-log-identity-copy h2,
+.photo-log-table-toolbar h2 {
+  color: var(--text-primary, #0f172a);
+  margin: 0;
+}
+
+.photo-log-header h1 {
+  font-size: clamp(28px, 3vw, 36px);
+  font-weight: 750;
+  letter-spacing: -0.045em;
+}
+
+.photo-log-header p:last-child,
+.photo-log-card-heading p,
+.photo-log-identity-copy p:last-child,
+.photo-log-table-toolbar p {
+  color: var(--text-muted, #64748b);
+  margin: 6px 0 0;
+}
+
+.photo-log-header p:last-child {
+  font-size: 14px;
+}
+
+.photo-log-eyebrow {
+  color: #0f9f6e;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  margin: 0 0 7px;
+}
+
+.photo-log-security-label {
+  background: linear-gradient(135deg, #ecfdf5, #f0fdfa);
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  color: #047857;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 8px 11px;
+}
+
+.photo-log-search-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+}
+
+.photo-log-card,
+.photo-log-results {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.055);
+  padding: 22px;
+}
+
+.photo-log-card-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 17px;
+}
+
+.photo-log-card-step {
+  align-items: center;
+  background: linear-gradient(145deg, #dcfce7, #e6fffa);
+  border: 1px solid #c5f0dc;
+  border-radius: 10px;
+  color: #0f9f6e;
+  display: inline-flex;
+  flex: 0 0 34px;
+  font-size: 11px;
+  font-weight: 800;
+  height: 34px;
+  justify-content: center;
+}
+
+.photo-log-card-heading h2 {
+  color: var(--text-primary, #0f172a);
+  font-size: 16px;
+  font-weight: 750;
+  margin: 0;
+}
+
+.photo-log-card-heading p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.photo-log-card > label {
+  color: var(--text-secondary, #334155);
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 7px;
+}
+
+.photo-log-card input[type='search'] {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 11px;
+  color: var(--text-primary, #0f172a);
+  font-size: 14px;
+  min-height: 48px;
+  outline: none;
+  padding: 11px 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  width: 100%;
+}
+
+.photo-log-card input[type='search']:focus,
+.photo-log-table-toolbar select:focus {
+  border-color: #34b883;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.photo-log-match-list {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 9px;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+  margin-top: 7px;
+  max-height: 250px;
+  overflow: auto;
+  position: relative;
+  z-index: 3;
+}
+
+.photo-log-match {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  color: var(--text-primary, #0f172a);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.photo-log-match:last-child {
+  border-bottom: 0;
+}
+
+.photo-log-match:hover,
+.photo-log-match:focus-visible {
+  background: rgba(16, 185, 129, 0.07);
+  outline: none;
+}
+
+.photo-log-match span {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.photo-log-match small,
+.photo-log-empty {
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+}
+
+.photo-log-empty {
+  margin: 0;
+  padding: 12px;
+}
+
+.photo-log-upload-row {
+  align-items: center;
+  background: var(--surface-subtle, #f8fafc);
+  border: 1px dashed var(--border-color, #cbd5e1);
+  border-radius: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 64px;
+  padding: 10px;
+}
+
+.photo-log-upload-row input[type='file'] {
+  color: var(--text-muted, #64748b);
+  flex: 1;
+  font-size: 11px;
+  min-width: 165px;
+}
+
+.photo-log-upload-row input[type='file']::file-selector-button {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  margin-right: 10px;
+  padding: 8px 10px;
+}
+
+.photo-log-upload-row input[type='file']::file-selector-button:hover {
+  background: #f1f5f9;
+}
+
+.photo-log-button,
+.photo-log-pagination button {
+  align-items: center;
+  background: #0f9f6e;
+  border: 1px solid #0f9f6e;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 13px;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
+}
+
+.photo-log-button:hover:not(:disabled) {
+  background: #07875d;
+  border-color: #07875d;
+  transform: translateY(-1px);
+}
+
+.photo-log-button:disabled,
+.photo-log-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.photo-log-button-secondary {
+  background: #fff;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.photo-log-button-secondary:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.photo-log-button-outline,
+.photo-log-pagination button {
+  background: #fff;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.photo-log-button-outline:hover:not(:disabled),
+.photo-log-pagination button:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.photo-log-upload-preview {
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 9px;
+  display: block;
+  height: 76px;
+  margin-top: 12px;
+  object-fit: cover;
+  width: 76px;
+}
+
+.photo-log-message {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 11px 14px;
+}
+
+.photo-log-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.photo-log-notice {
+  background: #ecfdf5;
+  border-color: #bbf7d0;
+  color: #047857;
+}
+
+.photo-log-results {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 18px;
+}
+
+.photo-log-employee {
+  align-items: center;
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(16, 185, 129, 0.09), transparent 55%),
+    linear-gradient(110deg, #f5fbf8 0%, #fff 76%);
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 22px 24px;
+}
+
+.photo-log-employee > div {
+  align-items: center;
+  display: flex;
+  gap: 13px;
+  min-width: 0;
+}
+
+.photo-log-identity-avatar {
+  align-items: center;
+  background: #d7f4e7;
+  border: 1px solid #b5e8d0;
+  border-radius: 15px;
+  color: #087c57;
+  display: flex;
+  flex: 0 0 60px;
+  font-size: 18px;
+  font-weight: 800;
+  height: 60px;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.photo-log-profile-image {
+  height: 60px;
+  object-fit: cover;
+  width: 60px;
+}
+
+.photo-log-identity-copy h2 {
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.photo-log-identity-copy p:last-child {
+  font-size: 12px;
+}
+
+.photo-log-record-total {
+  background: #fff;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 999px;
+  color: #475569;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 9px 13px;
+}
+
+.photo-log-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 18px 24px 4px;
+}
+
+.photo-log-summary-card {
+  background: linear-gradient(145deg, #fff, #f8fafc);
+  border: 1px solid #e8edf2;
+  border-radius: 12px;
+  display: grid;
+  gap: 7px;
+  padding: 14px 16px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.photo-log-summary-card:hover {
+  border-color: #b7e7d0;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.05);
+  transform: translateY(-1px);
+}
+
+.photo-log-summary-card span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.photo-log-summary-card strong {
+  color: #0f172a;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.photo-log-table-toolbar {
+  align-items: end;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 22px 24px 16px;
+}
+
+.photo-log-table-toolbar h2 {
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.photo-log-table-toolbar p {
+  font-size: 11px;
+}
+
+.photo-log-toolbar-actions {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.photo-log-toolbar-actions label {
+  color: var(--text-secondary, #334155);
+  display: grid;
+  font-size: 10px;
+  font-weight: 700;
+  gap: 5px;
+  min-width: 175px;
+}
+
+.photo-log-table-toolbar select {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 9px;
+  color: var(--text-primary, #0f172a);
+  font-size: 11px;
+  min-height: 38px;
+  outline: none;
+  padding: 8px 10px;
+}
+
+.photo-log-table-wrap {
+  border: 1px solid #e7edf0;
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  margin: 0 24px 8px;
+  overflow-x: auto;
+}
+
+.photo-log-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 760px;
+  width: 100%;
+}
+
+.photo-log-table th {
+  background: #f1f7f4;
+  border-bottom: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 14px 16px;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.photo-log-table th:first-child {
+  border-radius: 8px 0 0;
+}
+
+.photo-log-table th:last-child {
+  border-radius: 0 8px 0 0;
+}
+
+.photo-log-table td {
+  border-bottom: 1px solid #eef2f6;
+  color: #334155;
+  font-size: 13px;
+  padding: 13px 16px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.photo-log-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.photo-log-table tbody tr:nth-child(even) {
+  background: #fbfdfc;
+}
+
+.photo-log-table tbody tr:hover {
+  background: #effaf4;
+}
+
+.photo-log-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.photo-log-table td:first-child {
+  width: 104px;
+  white-space: normal;
+}
+
+.photo-log-thumbnail {
+  background: #f1f5f9;
+  border: 1px solid #dce5e8;
+  border-radius: 10px;
+  display: block;
+  height: 68px;
+  object-fit: cover;
+  width: 56px;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.photo-log-table tbody tr:hover .photo-log-thumbnail {
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+  transform: scale(1.03);
+}
+
+.photo-log-photo-caption {
+  color: #64748b;
+  display: block;
+  font-size: 9px;
+  line-height: 1.3;
+  margin-top: 5px;
+}
+
+.photo-log-image-state {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #64748b;
+  display: inline-flex;
+  font-size: 9px;
+  height: 68px;
+  justify-content: center;
+  width: 56px;
+}
+
+.photo-log-image-state.unavailable {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
+.photo-log-direction {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 6px 10px;
+}
+
+.photo-log-direction.entry {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.photo-log-direction.exit {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.photo-log-empty-state {
+  border: 1px dashed var(--border-color, #cbd5e1);
+  border-radius: 10px;
+  color: var(--text-muted, #64748b);
+  margin: 4px 24px 24px;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.photo-log-pagination {
+  align-items: center;
+  border-top: 1px solid #eef2f6;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding: 15px 24px;
+}
+
+.photo-log-pagination span {
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+}
+
+.photo-log-pagination button {
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+@media (max-width: 900px) {
+  .photo-log-search-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .photo-log-toolbar-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .photo-log-table-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 620px) {
+  .photo-log-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .photo-log-employee {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .photo-log-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 14px 16px 4px;
+  }
+
+  .photo-log-card,
+  .photo-log-results {
+    padding: 17px;
+  }
+
+  .photo-log-results {
+    padding: 0;
+  }
+
+  .photo-log-employee {
+    padding: 18px 16px;
+  }
+
+  .photo-log-table-toolbar {
+    padding: 18px 16px 14px;
+  }
+
+  .photo-log-table-wrap {
+    margin: 0 16px 8px;
+  }
+
+  .photo-log-empty-state {
+    margin: 4px 16px 16px;
+  }
+
+  .photo-log-pagination {
+    padding: 13px 16px;
+  }
+
+  .photo-log-toolbar-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .photo-log-toolbar-actions label {
+    grid-column: 1 / -1;
+  }
+
+  .photo-log-toolbar-actions .photo-log-button {
+    width: 100%;
+  }
+}

@@ -3,6 +3,7 @@ const navigationPageLoaders = {
   '/employees': () => import('../modules/employee/EmployeeList'),
   '/face-enrollments': () => import('../modules/face-enrollment/FaceEnrollmentList'),
   '/attendance': () => import('../modules/attendance/AttendanceList'),
+  '/photo-log': () => import('../modules/attendance/PhotoLog'),
   '/live-monitoring': () => import('../pages/LiveAttendanceMonitoring'),
   '/cameras': () => import('../modules/camera/CameraList'),
   '/vehicles': () => import('../modules/vehicle/VehicleList'),
