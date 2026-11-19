@@ -250,6 +250,26 @@ export const getByEmployeeId = async (req, res, next) => {
 
     if (req.query.source) filters.source = req.query.source;
     if (req.query.eventType) filters.eventType = req.query.eventType;
+    if (req.query.startDate !== undefined || req.query.endDate !== undefined) {
+      const startDate = typeof req.query.startDate === "string" ? new Date(req.query.startDate) : null;
+      const endDate = typeof req.query.endDate === "string" ? new Date(req.query.endDate) : null;
+
+      if (
+        !startDate ||
+        !endDate ||
+        Number.isNaN(startDate.getTime()) ||
+        Number.isNaN(endDate.getTime()) ||
+        endDate <= startDate
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid startDate and endDate range is required.",
+        });
+      }
+
+      filters.startDate = startDate;
+      filters.endDate = endDate;
+    }
 
     const attendances = await getEmployeeAttendances(
       employeeId,

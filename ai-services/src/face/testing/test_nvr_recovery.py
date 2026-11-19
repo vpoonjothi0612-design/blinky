@@ -76,6 +76,15 @@ class TestNVRRecoveryProduction(unittest.TestCase):
         self.outbox_file = self.scratch_dir / "test_outbox.json"
         self.audit_db_file = self.scratch_dir / "test_audit.db"
 
+    @patch.dict(os.environ, {}, clear=True)
+    def test_nvr_username_is_not_defaulted(self):
+        service = NVRRecoveryService(
+            checkpoint_file=self.checkpoint_file,
+            gaps_file=self.gaps_file,
+        )
+
+        self.assertEqual(service.nvr_user, "")
+
     def tearDown(self):
         for f in (self.checkpoint_file, self.gaps_file, self.outbox_file, self.audit_db_file):
             if f.exists():

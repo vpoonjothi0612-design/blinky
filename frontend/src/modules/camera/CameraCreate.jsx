@@ -104,9 +104,12 @@ const CameraCreate = () => {
           name="rtspUrl"
           value={formData.rtspUrl}
           onChange={handleChange}
-          placeholder="e.g. rtsp://admin:pass@192.168.1.100:554/stream"
+          placeholder="e.g. rtsp://192.168.1.100:554/stream"
           error={errors.rtspUrl}
         />
+        <small className="form-hint">
+          Do not include camera credentials in this URL. Store them in the AI service&apos;s local environment file.
+        </small>
 
         <div className="form-group">
           <label htmlFor="status" className="form-label">

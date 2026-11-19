@@ -85,7 +85,6 @@ const Sidebar = ({ open, onClose }) => {
             { label: 'Employees', path: '/employees', icon: Icons.employees },
             { label: 'Face Registry', path: '/face-enrollments', icon: Icons.face },
             { label: 'Attendance Log', path: '/attendance', icon: Icons.attendance },
-            { label: 'Photo Log', path: '/photo-log', icon: Icons.face },
           ],
         },
         {
@@ -101,6 +100,7 @@ const Sidebar = ({ open, onClose }) => {
           title: 'INSIGHTS',
           items: [
             { label: 'Reports', path: '/reports', icon: Icons.reports },
+            { label: 'Logs', path: '/photo-log', icon: Icons.face },
           ],
         },
         {
@@ -145,6 +145,11 @@ const Sidebar = ({ open, onClose }) => {
           title: 'GATE ATTENDANCE',
           items: [
             { label: 'Attendance Log', path: '/attendance', icon: Icons.attendance },
+          ],
+        },
+        {
+          title: 'INSIGHTS',
+          items: [
             { label: 'Photo Log', path: '/photo-log', icon: Icons.face },
           ],
         },

@@ -100,8 +100,8 @@ def run_rtsp_worker_tests() -> bool:
     # TEST 1: RTSP URL recognized as RTSP source
     # -------------------------------------------------------------------------
     print("\n[TEST 1] RTSP URL recognized as RTSP source...")
-    rtsp_url = "rtsp://admin:superSecret123@192.168.1.100:554/live/ch0"
-    rtsps_url = "rtsps://admin:pwd@10.0.0.50/stream"
+    rtsp_url = "rtsp://camera-user:example-password@192.168.1.100:554/live/ch0"
+    rtsps_url = "rtsps://camera-user:example-password@10.0.0.50/stream"
     local_path = "data/vehicle/input/test.mp4"
     webcam_idx = 0
 
@@ -119,7 +119,7 @@ def run_rtsp_worker_tests() -> bool:
         and w_file.is_file_source is True
         and w_cam.is_rtsp_source is False
         and w_cam.is_device_source is True
-        and "superSecret123" not in w_rtsp.sanitized_source
+        and "example-password" not in w_rtsp.sanitized_source
     )
     test_results["TEST 1: RTSP Source Recognition"] = (
         "PASS" if t1_pass else "FAIL",
@@ -309,8 +309,8 @@ def run_rtsp_worker_tests() -> bool:
     # TEST 7: Credentials are never written to logs
     # -------------------------------------------------------------------------
     print("\n[TEST 7] Credentials are never written to logs...")
-    sensitive_password = "SuperSecretCameraPassword_987654"
-    sensitive_user = "admin_super"
+    sensitive_password = "test-only-password"
+    sensitive_user = "test-only-user"
     sensitive_url = f"rtsp://{sensitive_user}:{sensitive_password}@192.168.1.200:554/Streaming/Channels/1"
 
     # Capture all logs during worker lifecycle

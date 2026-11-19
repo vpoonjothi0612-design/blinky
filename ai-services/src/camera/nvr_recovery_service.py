@@ -3,13 +3,11 @@
 Recovers missed attendance processing intervals from CP PLUS NVR / IP camera footage
 after an application server outage, crash, or network disconnect.
 
-Physical Hardware Details (Verified):
+Local recorder settings are supplied through the AI service environment:
 - Brand: CP PLUS
-- Model: CP-UNR-4K4082-V4 (Platform: DH-NVR4232-HDS3)
-- NVR IP: 192.168.15.55 (RTSP Port 554, HTTP 80/443)
-- CAM-01 (192.168.15.56): Exit camera  -> NVR Channel 2 (Event: OUT)
-- CAM-02 (192.168.15.57): Entry camera -> NVR Channel 1 (Event: IN)
-- Timezone: Asia/Kolkata (UTC+05:30)
+- NVR address and credentials: NVR_IP, NVR_USERNAME, NVR_PASSWORD
+- Camera channel mapping: NVR_CHANNEL_CAM01 and NVR_CHANNEL_CAM02
+- Timezone: NVR_TIMEZONE
 
 Key Capabilities:
 1. Persistent Checkpoint Management:
@@ -234,15 +232,13 @@ class NVRRecoveryService:
         # NVR Configuration from environment
         self.nvr_ip = os.environ.get("NVR_IP", "").strip()
         self.nvr_port = int(os.environ.get("NVR_PORT", "554"))
-        self.nvr_user = os.environ.get("NVR_USERNAME", "admin").strip()
+        self.nvr_user = os.environ.get("NVR_USERNAME", "").strip()
         self.nvr_pass = os.environ.get("NVR_PASSWORD", "").strip()
         self.nvr_scheme = os.environ.get("NVR_PLAYBACK_SCHEME", "rtsp").strip()
         self.nvr_timezone = os.environ.get("NVR_TIMEZONE", "Asia/Kolkata").strip()
         self.recovery_timeout_sec = float(os.environ.get("NVR_RECOVERY_TIMEOUT_SEC", "5.0"))
 
-        # Physical Channel Mapping verified on CP-UNR-4K4082-V4:
-        # CAM-01 (192.168.15.56 - OUT) -> Channel 2
-        # CAM-02 (192.168.15.57 - IN)  -> Channel 1
+        # Channel mappings can be overridden for the local recorder.
         self.nvr_channel_map = {
             "CAM-01": int(os.environ.get("NVR_CHANNEL_CAM01", "2")),
             "CAM-02": int(os.environ.get("NVR_CHANNEL_CAM02", "1")),

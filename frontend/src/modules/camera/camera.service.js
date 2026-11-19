@@ -46,6 +46,11 @@ export const testCameraStreamConnection = async (url) => {
   return response.data;
 };
 
+export const testRtspCamera = async (cameraId) => {
+  const response = await api.get(`/cameras/rtsp-test/${encodeURIComponent(cameraId)}`);
+  return response.data;
+};
+
 export const getCameraStreamEvents = async () => {
   const response = await api.get('/cameras/stream/events');
   return response.data;
@@ -61,5 +66,6 @@ export default {
   startCameraStream,
   stopCameraStream,
   testCameraStreamConnection,
+  testRtspCamera,
   getCameraStreamEvents,
 };

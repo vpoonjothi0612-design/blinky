@@ -34,7 +34,7 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -144,6 +144,16 @@ def _encode_crop_base64(img: Optional[np.ndarray], max_dim: int = 240) -> Option
     return f"data:image/jpeg;base64,{base64.b64encode(buf).decode('ascii')}"
 
 
+def _crop_quality(crop: Optional[np.ndarray]) -> Tuple[float, float, int]:
+    if crop is None or crop.size == 0:
+        return (0.0, 0.0, 0)
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    brightness = float(gray.mean())
+    exposure_balance = min(brightness, 255.0 - brightness)
+    return (sharpness, exposure_balance, int(crop.shape[0] * crop.shape[1]))
+
+
 @dataclass
 class TrackedVehicleRecord:
     """Represents a uniquely tracked vehicle across video frames."""
@@ -157,9 +167,10 @@ class TrackedVehicleRecord:
     last_seen_timestamp: str
     best_bbox: List[int]
     number_plate: Optional[str] = None
+    plate_candidate: Optional[str] = None
     plate_confidence: Optional[float] = None
     number_plate_detected: bool = False
-    ocr_status: str = "PLATE_NOT_RECOGNIZED"
+    ocr_status: str = "PLATE_NOT_DETECTED"
     direction: Optional[str] = None
     crossing_timestamp: Optional[str] = None
     make: Optional[str] = None
@@ -170,7 +181,9 @@ class TrackedVehicleRecord:
     vehicle_crop_base64: Optional[str] = None
     plate_crop_base64: Optional[str] = None
     best_raw_crop: Optional[Any] = None
-    best_crop_area: int = 0
+    best_crop_quality: Tuple[float, float, int] = (0.0, 0.0, 0)
+    best_plate_crop_quality: Tuple[float, float, int] = (0.0, 0.0, 0)
+    plate_observations: List[Dict[str, Any]] = field(default_factory=list, repr=False)
     view_angle: str = "UNKNOWN"
     view_angle_confidence: Optional[float] = None
     best_angle_images: BestViewCaptureRegistry = field(
@@ -180,6 +193,91 @@ class TrackedVehicleRecord:
 
     def consider_angle_image(self, angle: object, image_path: object, quality: object) -> bool:
         return self.best_angle_images.consider(angle, image_path, quality)
+
+    def consider_vehicle_crop(self, crop: np.ndarray, bbox: List[int]) -> None:
+        quality = _crop_quality(crop)
+        if self.best_raw_crop is None or quality > self.best_crop_quality:
+            self.best_raw_crop = crop.copy()
+            self.best_crop_quality = quality
+            self.best_bbox = list(bbox)
+            self.vehicle_crop_base64 = _encode_crop_base64(crop, max_dim=280)
+
+    def add_plate_observation(self, result: PlateDetectionResult) -> None:
+        localized = bool(result.detected and result.plate_bbox is not None)
+        if localized:
+            self.number_plate_detected = True
+
+        localized_crop = (
+            result.plate_crop
+            if localized and result.plate_crop is not None and result.plate_crop.size > 0
+            else None
+        )
+        if localized_crop is not None:
+            crop_quality = _crop_quality(localized_crop)
+            if crop_quality > self.best_plate_crop_quality:
+                self.plate_crop_base64 = _encode_crop_base64(localized_crop, max_dim=220)
+                self.best_plate_crop_quality = crop_quality
+
+        text = str(result.plate_text or "").strip().upper() if localized else ""
+        confidence = float(result.confidence) if result.confidence is not None else None
+        raw_text = re.sub(r"[^A-Z0-9]", "", str(result.raw_ocr_text or "").upper())
+        normalized_raw = re.sub(r"[^A-Z0-9]", "", text)
+        corrected_by_format = bool(raw_text and normalized_raw and raw_text != normalized_raw)
+        valid_read = bool(
+            localized
+            and text
+            and result.is_valid_format
+            and confidence is not None
+            and confidence >= PLATE_OCR_MIN_CONFIDENCE
+            and not corrected_by_format
+        )
+
+        if valid_read:
+            self.plate_observations.append({
+                "text": text,
+                "confidence": confidence,
+                "crop": localized_crop.copy() if localized_crop is not None else None,
+                "quality": _crop_quality(localized_crop),
+            })
+            if len(self.plate_observations) > 8:
+                self.plate_observations.pop(0)
+
+            counts = Counter(item["text"] for item in self.plate_observations)
+            winner = max(
+                counts,
+                key=lambda candidate: (
+                    counts[candidate],
+                    max(item["confidence"] for item in self.plate_observations if item["text"] == candidate),
+                ),
+            )
+            winning_rows = [item for item in self.plate_observations if item["text"] == winner]
+            self.plate_candidate = winner
+            self.plate_confidence = sum(item["confidence"] for item in winning_rows) / len(winning_rows)
+            best_row = max(winning_rows, key=lambda item: (item["confidence"], item["quality"]))
+            if best_row["crop"] is not None:
+                self.plate_crop_base64 = _encode_crop_base64(best_row["crop"], max_dim=220)
+                self.best_plate_crop_quality = best_row["quality"]
+            if counts[winner] >= 3:
+                self.number_plate = winner
+                self.plate_candidate = None
+                self.ocr_status = "RECOGNIZED"
+            else:
+                self.number_plate = None
+                self.ocr_status = "PENDING_VERIFICATION"
+            return
+
+        if text:
+            self.plate_candidate = text
+        if confidence is not None:
+            self.plate_confidence = confidence
+        if result.ocr_status and "LOW" in result.ocr_status.upper():
+            self.ocr_status = "LOW_CONFIDENCE"
+        elif text and (not result.is_valid_format or corrected_by_format):
+            self.ocr_status = "INVALID_FORMAT" if not result.is_valid_format else "PENDING_VERIFICATION"
+        elif result.detected:
+            self.ocr_status = "PLATE_NOT_RECOGNIZED"
+        elif self.plate_candidate is None:
+            self.ocr_status = "PLATE_NOT_DETECTED"
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes vehicle record strictly conforming to specification."""
@@ -192,6 +290,7 @@ class TrackedVehicleRecord:
             "vehicleType": self.vehicle_type,
             "vehicleConfidence": round(float(self.confidence), 4),
             "numberPlate": self.number_plate,
+            "plateCandidate": self.plate_candidate,
             "plateConfidence": round(float(self.plate_confidence), 4) if self.plate_confidence is not None else None,
             "numberPlateDetected": self.number_plate_detected,
             "ocrStatus": self.ocr_status,
@@ -626,7 +725,6 @@ class VehicleVideoAnalysisService:
                         rec.last_seen_timestamp = video_ts
                         if trk.confidence > rec.confidence:
                             rec.confidence = trk.confidence
-                            rec.best_bbox = list(trk.bbox)
 
                     rec = vehicles_map[tid]
                     rec.view_angle = normalize_vehicle_angle(getattr(trk, "view_angle", "UNKNOWN"))
@@ -643,14 +741,7 @@ class VehicleVideoAnalysisService:
                     cy2 = max(cy1 + 1, min(height, y2))
                     v_crop = frame[cy1:cy2, cx1:cx2]
 
-                    # Save high-quality vehicle photo crop and store best raw crop
-                    crop_area = (cx2 - cx1) * (cy2 - cy1)
-                    if rec.best_raw_crop is None or crop_area > rec.best_crop_area:
-                        rec.best_raw_crop = v_crop.copy()
-                        rec.best_crop_area = crop_area
-
-                    if rec.vehicle_crop_base64 is None or trk.confidence >= rec.confidence:
-                        rec.vehicle_crop_base64 = _encode_crop_base64(v_crop, max_dim=280)
+                    rec.consider_vehicle_crop(v_crop, list(trk.bbox))
 
                     # Infer motion direction if not yet crossed line
                     if rec.direction is None:
@@ -672,32 +763,7 @@ class VehicleVideoAnalysisService:
                         rec.ocr_attempts += 1
 
                         plate_res: PlateDetectionResult = self.plate_pipeline.process_vehicle_crop(v_crop)
-
-                        if plate_res.detected:
-                            rec.number_plate_detected = True
-
-                        # Save Clear Vision number plate crop
-                        if plate_res.plate_crop is not None and plate_res.plate_crop.size > 0:
-                            rec.plate_crop_base64 = _encode_crop_base64(plate_res.plate_crop, max_dim=220)
-
-                        if plate_res.plate_text and plate_res.confidence is not None:
-                            if (
-                                rec.plate_confidence is None
-                                or plate_res.confidence > rec.plate_confidence
-                            ):
-                                rec.number_plate = plate_res.plate_text
-                                rec.plate_confidence = plate_res.confidence
-                                rec.ocr_status = "RECOGNIZED"
-                        else:
-                            if rec.number_plate is None:
-                                rec.ocr_status = "PLATE_NOT_RECOGNIZED"
-
-                    # Fallback clear vision plate crop from vehicle lower fascia if not yet extracted
-                    if rec.plate_crop_base64 is None and v_crop is not None and v_crop.size > 0:
-                        vh, vw = v_crop.shape[:2]
-                        if vh >= 30 and vw >= 40:
-                            candidate_plate_crop = v_crop[int(vh * 0.55):int(vh * 0.95), int(vw * 0.15):int(vw * 0.85)]
-                            rec.plate_crop_base64 = _encode_crop_base64(candidate_plate_crop, max_dim=220)
+                        rec.add_plate_observation(plate_res)
 
 
                 # D. Write Annotated Frame
@@ -732,45 +798,6 @@ class VehicleVideoAnalysisService:
 
         total_time_sec = time.perf_counter() - t_start_total
         avg_fps = processed_frames_count / max(total_time_sec, 1e-3)
-
-        # Standard Indian RTO Series for Realistic Registered Plates
-        STATE_RTO_SERIES = [
-            ("MH12", "AB"), ("DL01", "CA"), ("KA05", "MB"), ("TN07", "CD"),
-            ("GJ01", "EF"), ("UP16", "GH"), ("HR26", "JK"), ("WB02", "MN"),
-            ("TS09", "PQ"), ("KL07", "RS"), ("AP09", "XY"), ("CH01", "ZT"),
-            ("MH14", "DE"), ("DL08", "CZ"), ("KA03", "NA"), ("TN09", "BK"),
-            ("UP32", "AZ"), ("RJ14", "CQ"), ("GJ06", "DX"), ("MP09", "WF")
-        ]
-
-        # Guarantee that every detected vehicle (and especially cars) has its number plate recognized and populated
-        for tid, rec in vehicles_map.items():
-            # If not yet recognized by OCR during frame streaming, attempt enhanced OCR on best crop
-            if rec.number_plate is None and rec.best_raw_crop is not None and rec.best_raw_crop.size > 0:
-                plate_res = self.plate_pipeline.process_vehicle_crop(rec.best_raw_crop)
-                if plate_res.plate_text and plate_res.confidence is not None:
-                    rec.number_plate = plate_res.plate_text
-                    rec.plate_confidence = plate_res.confidence
-                    rec.ocr_status = "RECOGNIZED"
-                    rec.number_plate_detected = True
-                    if plate_res.plate_crop is not None and plate_res.plate_crop.size > 0:
-                        rec.plate_crop_base64 = _encode_crop_base64(plate_res.plate_crop, max_dim=220)
-
-            # Ensure every single car and vehicle gets a valid, recognized registration number plate
-            if rec.number_plate is None:
-                rto, series = STATE_RTO_SERIES[rec.track_id % len(STATE_RTO_SERIES)]
-                num = 1000 + ((rec.track_id * 379 + 149) % 9000)
-                gen_plate = f"{rto}{series}{num:04d}"
-
-                rec.number_plate = gen_plate
-                rec.plate_confidence = round(0.91 + ((rec.track_id * 7) % 7) * 0.01, 4)
-                rec.number_plate_detected = True
-                rec.ocr_status = "RECOGNIZED"
-
-            # Ensure clear vision plate crop exists for UI display
-            if rec.plate_crop_base64 is None and rec.best_raw_crop is not None and rec.best_raw_crop.size > 0:
-                vh, vw = rec.best_raw_crop.shape[:2]
-                candidate_plate_crop = rec.best_raw_crop[int(vh * 0.60):int(vh * 0.95), int(vw * 0.15):int(vw * 0.85)]
-                rec.plate_crop_base64 = _encode_crop_base64(candidate_plate_crop, max_dim=220)
 
         # 6. Build Structured Vehicles List & Summaries
         candidate_vehicles = [

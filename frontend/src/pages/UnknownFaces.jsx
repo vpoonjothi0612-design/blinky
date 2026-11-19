@@ -280,77 +280,66 @@ const UnknownFaces = () => {
     return getFaceReviewMedia(faceOrUrl).mediaKey;
   }, []);
 
-  // Helper: Resolve Camera & Direction based on hardware mapping:
-  // - CAM-01 (192.168.15.56) -> OUT (Exit)
-  // - CAM-02 (192.168.15.57) -> IN (Entrance)
+  // Resolve gate direction from the configured camera identity or event metadata.
   const resolveCameraInfo = useCallback((face) => {
     if (!face) {
       return {
-        name: 'CAM-02',
-        ip: '192.168.15.57',
-        role: 'IN',
-        directionLabel: 'Entrance / IN',
-        location: 'Entrance / IN (Main Gate)',
+        name: 'Unknown camera',
+        ip: '—',
+        role: 'UNKNOWN',
+        directionLabel: 'Direction unavailable',
+        location: 'Location unavailable',
       };
     }
 
     const photo = (face.photoUrl || '').toUpperCase();
     const camObj = face.camera || {};
-    const camName = (camObj.name || '').toUpperCase();
-
-    // Check CAM-01 (192.168.15.56 - Exit / OUT)
-    if (
-      camName.includes('CAM-01') ||
-      camName.includes('CAM01') ||
-      camName.includes('207') ||
-      photo.includes('CAM-01') ||
-      photo.includes('207')
-    ) {
-      return {
-        name: 'CAM-01',
-        ip: camObj.ipAddress || '192.168.15.56',
-        role: 'OUT',
-        directionLabel: 'Exit / OUT',
-        location: camObj.location || 'Exit / OUT (Turnstile)',
-      };
-    }
-
-    // Check CAM-02 (192.168.15.57 - Entrance / IN)
-    if (
-      camName.includes('CAM-02') ||
-      camName.includes('CAM02') ||
-      camName.includes('208') ||
-      photo.includes('CAM-02') ||
-      photo.includes('208')
-    ) {
-      return {
-        name: 'CAM-02',
-        ip: camObj.ipAddress || '192.168.15.57',
-        role: 'IN',
-        directionLabel: 'Entrance / IN',
-        location: camObj.location || 'Entrance / IN (Main Gate)',
-      };
-    }
-
-    // Fallback inspect notes JSON
+    let notes = {};
     if (face.notes) {
       try {
-        const parsed = typeof face.notes === 'string' ? JSON.parse(face.notes) : face.notes;
-        if (parsed.cameraId === 'CAM-01' || parsed.camera === 'CAM-01') {
-          return { name: 'CAM-01', ip: '192.168.15.56', role: 'OUT', directionLabel: 'Exit / OUT', location: 'Exit / OUT' };
-        }
-        if (parsed.cameraId === 'CAM-02' || parsed.camera === 'CAM-02') {
-          return { name: 'CAM-02', ip: '192.168.15.57', role: 'IN', directionLabel: 'Entrance / IN', location: 'Entrance / IN' };
-        }
-      } catch { }
+        notes = typeof face.notes === 'string' ? JSON.parse(face.notes) : face.notes;
+      } catch {
+        notes = {};
+      }
     }
 
+    const cameraLabel = [
+      camObj.name,
+      camObj.location,
+      face.cameraId,
+      face.direction,
+      notes.cameraId,
+      notes.camera,
+      notes.direction,
+      photo,
+    ].filter(Boolean).join(' ').toUpperCase();
+    const isExitCamera = /CAM[-_ ]?0?1/.test(cameraLabel) || /\b(EXIT|OUT)\b/.test(cameraLabel);
+    const isEntryCamera = /CAM[-_ ]?0?2/.test(cameraLabel) || /\b(ENTRY|IN)\b/.test(cameraLabel);
+
+    if (isExitCamera) {
+      return {
+        name: camObj.name || 'CAM-01',
+        ip: camObj.ipAddress || notes.cameraIp || '—',
+        role: 'OUT',
+        directionLabel: 'Exit / OUT',
+        location: camObj.location || 'Exit gate',
+      };
+    }
+    if (isEntryCamera) {
+      return {
+        name: camObj.name || 'CAM-02',
+        ip: camObj.ipAddress || notes.cameraIp || '—',
+        role: 'IN',
+        directionLabel: 'Entrance / IN',
+        location: camObj.location || 'Entry gate',
+      };
+    }
     return {
-      name: camObj.name || 'CAM-01 (OUT)',
-      ip: camObj.ipAddress || '192.168.15.56',
-      role: 'OUT',
-      directionLabel: 'Exit / OUT',
-      location: camObj.location || 'Main Gate',
+      name: camObj.name || 'Unknown camera',
+      ip: camObj.ipAddress || notes.cameraIp || '—',
+      role: 'UNKNOWN',
+      directionLabel: 'Direction unavailable',
+      location: camObj.location || 'Location unavailable',
     };
   }, []);
 
@@ -2006,7 +1995,7 @@ const UnknownFaces = () => {
                       <div className="unrec-m-detail-item">
                         <span className="unrec-m-detail-label">CAMERA &amp; GATE</span>
                         <div className="unrec-m-detail-val">
-                          <span className={`unrec-m-cam-dot ${camInfo.role === 'IN' ? 'in-dot' : 'out-dot'}`} />
+                          <span className={`unrec-m-cam-dot ${camInfo.role === 'IN' ? 'in-dot' : camInfo.role === 'OUT' ? 'out-dot' : 'unknown-dot'}`} />
                           <strong>{camInfo.name}</strong> ({camInfo.directionLabel})
                         </div>
                       </div>
@@ -2602,7 +2591,7 @@ const UnknownFaces = () => {
                     <div className="unrec-meta-rows">
                       <div className="unrec-meta-row">
                         <span className="meta-label">Camera Identifier:</span>
-                        <span className={`meta-value camera-tag ${camInfo.role === 'IN' ? 'tag-cam-in' : 'tag-cam-out'}`}>
+                        <span className={`meta-value camera-tag ${camInfo.role === 'IN' ? 'tag-cam-in' : camInfo.role === 'OUT' ? 'tag-cam-out' : 'tag-cam-unknown'}`}>
                           {camInfo.name} ({camInfo.role})
                         </span>
                       </div>
@@ -2616,8 +2605,8 @@ const UnknownFaces = () => {
                       </div>
                       <div className="unrec-meta-row">
                         <span className="meta-label">Direction Event:</span>
-                        <span className={`meta-value direction-pill ${camInfo.role === 'IN' ? 'dir-in' : 'dir-out'}`}>
-                          {camInfo.role === 'IN' ? '↓ Entry (IN)' : '↑ Exit (OUT)'}
+                        <span className={`meta-value direction-pill ${camInfo.role === 'IN' ? 'dir-in' : camInfo.role === 'OUT' ? 'dir-out' : 'dir-unknown'}`}>
+                          {camInfo.role === 'IN' ? '↓ Entry (IN)' : camInfo.role === 'OUT' ? '↑ Exit (OUT)' : 'Direction unavailable'}
                         </span>
                       </div>
                     </div>
@@ -4181,6 +4170,12 @@ const UnknownFaces = () => {
           border: 1px solid #fed7aa;
         }
 
+        .tag-cam-unknown {
+          background: #f1f5f9;
+          color: #475569;
+          border: 1px solid #cbd5e1;
+        }
+
         .meta-value.ip-code {
           font-family: monospace;
           font-size: 12px;
@@ -4205,6 +4200,11 @@ const UnknownFaces = () => {
         .dir-out {
           background: #fee2e2;
           color: #991b1b;
+        }
+
+        .dir-unknown {
+          background: #e2e8f0;
+          color: #475569;
         }
 
         .unrec-modal-close-btn {
@@ -5829,6 +5829,10 @@ const UnknownFaces = () => {
 
           .unrec-m-cam-dot.out-dot {
             background: #2563eb;
+          }
+
+          .unrec-m-cam-dot.unknown-dot {
+            background: #94a3b8;
           }
 
           .unrec-m-scans-tag {

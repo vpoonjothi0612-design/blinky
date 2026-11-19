@@ -25,12 +25,26 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 # Visual color mapping (BGR)
 COLOR_PERSON_REC = (0, 220, 50)       # Emerald Green
-COLOR_PERSON_UNK = (0, 140, 255)      # Vibrant Amber / Orange
+COLOR_PERSON_UNK = (0, 0, 255)        # Confirmed unknown person
 COLOR_VEHICLE = (255, 180, 0)         # Cyan / Sky Blue
 COLOR_ANIMAL = (0, 215, 255)          # Gold / Yellow
 COLOR_OTHER = (180, 180, 180)         # Neutral Slate
 COLOR_FACE_PENDING = (255, 200, 0)   # Face visible/evaluation pending
-COLOR_FACE_REJECTED = (0, 165, 255)  # Face quality/pose needs attention
+COLOR_FACE_REJECTED = (0, 255, 255)  # Face quality/pose needs attention
+COLOR_FACE_NOT_VISIBLE = (150, 150, 150)
+COLOR_RECOGNITION_ERROR = (180, 70, 180)
+
+
+def person_status_color(status: str) -> Tuple[int, int, int]:
+    return {
+        "REGISTERED": COLOR_PERSON_REC,
+        "UNKNOWN_PERSON": COLOR_PERSON_UNK,
+        "RECOGNITION_PENDING": COLOR_FACE_PENDING,
+        "LOW_FACE_QUALITY": COLOR_FACE_REJECTED,
+        "FACE_NOT_VISIBLE": COLOR_FACE_NOT_VISIBLE,
+        "BACK_VIEW": COLOR_FACE_NOT_VISIBLE,
+        "RECOGNITION_ERROR": COLOR_RECOGNITION_ERROR,
+    }.get(status, COLOR_FACE_PENDING)
 
 
 def draw_gate_surveillance_hud(
@@ -82,6 +96,8 @@ def draw_gate_surveillance_hud(
         event_label = t.get("event_type")
         tid = t.get("track_id", 0)
         face_state = t.get("face_state")
+        recognition_status = t.get("recognition_status")
+        orientation = t.get("human_orientation") or "UNKNOWN_ORIENTATION"
 
         counts[cls_name] = counts.get(cls_name, 0) + 1
 
@@ -91,15 +107,13 @@ def draw_gate_surveillance_hud(
 
         # Choose box color
         if cls_name == "PERSON":
-            if face_state == "CONFIRMED":
-                color = COLOR_PERSON_REC
-                badge_title = f"[PERSON] {name}"
-            elif face_state == "UNKNOWN":
-                color = COLOR_PERSON_UNK
-                badge_title = "[PERSON] Unknown"
-            else:
-                color = COLOR_FACE_PENDING if face_state in {"FACE_EVALUATED", "FACE_NOT_VISIBLE", "PERSON_TRACKED"} else COLOR_FACE_REJECTED
-                badge_title = f"[PERSON] {face_state or 'PERSON_TRACKED'}"
+            legacy_status = "REGISTERED" if face_state == "CONFIRMED" else "UNKNOWN_PERSON" if face_state == "UNKNOWN" else None
+            recognition_status = recognition_status or legacy_status or "RECOGNITION_PENDING"
+            color = person_status_color(recognition_status)
+            status_label = recognition_status.replace("_", " ")
+            similarity = t.get("similarity")
+            score_label = f" {float(similarity) * 100:.1f}%" if similarity is not None else ""
+            badge_title = f"[{status_label}] {name} #{tid} {orientation}{score_label}"
         elif cls_name == "VEHICLE":
             color = COLOR_VEHICLE
             badge_title = f"[VEHICLE] {sub_label}: {name}" if name and name != sub_label else f"[VEHICLE] {sub_label}"
@@ -148,9 +162,9 @@ def draw_gate_surveillance_hud(
         if cls_name == "PERSON" and face_bbox:
             fx, fy, fw, fh = map(int, face_bbox)
             if fw > 0 and fh > 0:
-                face_color = COLOR_PERSON_REC if face_state == "CONFIRMED" else COLOR_PERSON_UNK if face_state == "UNKNOWN" else COLOR_FACE_REJECTED if face_state in {"FACE_TOO_SMALL", "FACE_QUALITY_LOW", "FACE_TURNED_AWAY"} else COLOR_FACE_PENDING
+                face_color = person_status_color(recognition_status)
                 cv2.rectangle(display, (fx, fy), (fx + fw, fy + fh), face_color, 2)
-                face_label = f"{face_state or 'FACE'} {float(t.get('best_face_score') or 0.0):.2f}"
+                face_label = f"#{tid} {orientation} {recognition_status.replace('_', ' ')} {float(t.get('best_face_score') or 0.0):.2f}"
                 cv2.putText(display, face_label, (fx, max(12, fy - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.38, face_color, 1, cv2.LINE_AA)
                 for point in t.get("face_landmarks") or []:
                     px, py = int(round(point[0])), int(round(point[1]))

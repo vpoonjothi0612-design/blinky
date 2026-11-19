@@ -10,6 +10,15 @@ import {
 } from "./camera.service.js";
 import { createCameraSchema, updateCameraSchema } from "./camera.zod.js";
 import cameraEventListener from "../../services/cameraEventListener.service.js";
+import aiClient from "../../services/aiClient.service.js";
+
+const toSafeCamera = (camera) => {
+  const plain = camera?.toJSON ? camera.toJSON() : { ...camera };
+  if (typeof plain.rtspUrl === "string") {
+    plain.rtspUrl = plain.rtspUrl.replace(/(rtsps?:\/\/)[^/@\s]+@/i, "$1");
+  }
+  return plain;
+};
 
 export const create = async (req, res, next) => {
   try {
@@ -27,7 +36,7 @@ export const create = async (req, res, next) => {
     return res.status(201).json({
       success: true,
       message: "Camera created successfully",
-      data: camera,
+      data: toSafeCamera(camera),
     });
   } catch (error) {
     next(error);
@@ -41,7 +50,7 @@ export const getAll = async (req, res, next) => {
 
     const enriched = await Promise.all(
       cameras.map(async (c) => {
-        const plain = c.toJSON ? c.toJSON() : { ...c };
+        const plain = toSafeCamera(c);
 
         if (plain.status === "INACTIVE") {
           plain.isOnline = false;
@@ -49,10 +58,12 @@ export const getAll = async (req, res, next) => {
           return plain;
         }
 
-        const isStreamConnected =
+        const isStreamConnected = Boolean(
+          plain.ipAddress &&
           streamStatus.connected &&
           (streamStatus.cameraIp === plain.ipAddress ||
-            streamStatus.configuredUrl?.includes(plain.ipAddress));
+            streamStatus.configuredUrl?.includes(plain.ipAddress))
+        );
 
         if (isStreamConnected) {
           plain.isOnline = true;
@@ -91,7 +102,7 @@ export const getById = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Camera retrieved successfully",
-      data: camera,
+      data: toSafeCamera(camera),
     });
   } catch (error) {
     next(error);
@@ -114,7 +125,7 @@ export const update = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Camera updated successfully",
-      data: camera,
+      data: toSafeCamera(camera),
     });
   } catch (error) {
     next(error);
@@ -185,6 +196,33 @@ export const testStreamConnection = async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+};
+
+export const testRtspCamera = async (req, res) => {
+  const cameraId = String(req.params.cameraId || "").trim().toUpperCase();
+  if (!["CAM-01", "CAM-02"].includes(cameraId)) {
+    return res.status(400).json({
+      success: false,
+      message: "Camera ID must be CAM-01 or CAM-02.",
+    });
+  }
+
+  try {
+    const result = await aiClient.checkHealth(
+      `${config.aiServiceUrl.replace(/\/+$/, "")}/camera-diagnostics/${cameraId}`
+    );
+    return res.status(200).json({ success: Boolean(result.success), data: result });
+  } catch (error) {
+    return res.status(502).json({
+      success: false,
+      message: error.message || "AI camera diagnostics are unavailable.",
+      data: {
+        camera_id: cameraId,
+        state: "SERVICE_UNAVAILABLE",
+        decode_status: "NOT_TESTED",
+      },
+    });
   }
 };
 

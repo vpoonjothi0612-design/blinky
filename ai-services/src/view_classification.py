@@ -3,8 +3,25 @@ from __future__ import annotations
 import math
 from typing import Dict, Iterable, Optional
 
-HUMAN_ORIENTATIONS = frozenset({"FRONT", "LEFT", "RIGHT", "BACK", "UNKNOWN"})
-HUMAN_CAPTURE_ORIENTATIONS = ("FRONT", "LEFT", "RIGHT")
+HUMAN_ORIENTATIONS = frozenset({
+    "FRONT",
+    "FRONT_LEFT",
+    "FRONT_RIGHT",
+    "LEFT_PROFILE",
+    "RIGHT_PROFILE",
+    "LEFT",
+    "RIGHT",
+    "BACK",
+    "UNKNOWN",
+    "UNKNOWN_ORIENTATION",
+})
+HUMAN_CAPTURE_ORIENTATIONS = (
+    "FRONT",
+    "FRONT_LEFT",
+    "FRONT_RIGHT",
+    "LEFT_PROFILE",
+    "RIGHT_PROFILE",
+)
 VEHICLE_ANGLES = frozenset({"FRONT", "LEFT", "RIGHT", "REAR", "TOP", "UNKNOWN"})
 VEHICLE_CAPTURE_ANGLES = ("FRONT", "LEFT", "RIGHT", "REAR")
 

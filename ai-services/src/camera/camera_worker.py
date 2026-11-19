@@ -209,6 +209,91 @@ class CameraWorker:
             "last_error": err_msg,
         }
 
+    def test_connection(self, sample_duration_sec: float = 1.0) -> dict:
+        """Opens the configured stream and reports measured decode information."""
+        started_at = time.perf_counter()
+        cap = self._open_capture()
+        if cap is None:
+            return {
+                "success": False,
+                "state": "DISCONNECTED",
+                "decode_status": "FAIL",
+                "resolution": None,
+                "fps": 0.0,
+                "reported_fps": 0.0,
+                "codec": "UNKNOWN",
+                "frames_decoded": 0,
+                "read_failures": 0,
+                "first_frame_ms": None,
+                "test_duration_ms": round((time.perf_counter() - started_at) * 1000, 1),
+                "error": "Unable to open the configured camera stream.",
+            }
+
+        try:
+            first_ok, first_frame = cap.read()
+            first_frame_ms = round((time.perf_counter() - started_at) * 1000, 1)
+            if (
+                not first_ok
+                or not isinstance(first_frame, np.ndarray)
+                or first_frame.ndim < 2
+                or first_frame.size == 0
+            ):
+                return {
+                    "success": False,
+                    "state": "ERROR",
+                    "decode_status": "FAIL",
+                    "resolution": None,
+                    "fps": 0.0,
+                    "reported_fps": 0.0,
+                    "codec": "UNKNOWN",
+                    "frames_decoded": 0,
+                    "read_failures": 1,
+                    "first_frame_ms": first_frame_ms,
+                    "test_duration_ms": round((time.perf_counter() - started_at) * 1000, 1),
+                    "error": "The stream opened but did not decode a valid frame.",
+                }
+
+            height, width = first_frame.shape[:2]
+            frames_decoded = 1
+            read_failures = 0
+            sample_started = time.perf_counter()
+            deadline = sample_started + max(0.0, sample_duration_sec)
+            while time.perf_counter() < deadline:
+                frame_ok, frame = cap.read()
+                if (
+                    not frame_ok
+                    or not isinstance(frame, np.ndarray)
+                    or frame.ndim < 2
+                    or frame.size == 0
+                ):
+                    read_failures += 1
+                    break
+                frames_decoded += 1
+
+            sample_elapsed = max(time.perf_counter() - sample_started, 1e-9)
+            reported_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+            fourcc = int(cap.get(cv2.CAP_PROP_FOURCC) or 0)
+            codec = "".join(chr((fourcc >> (8 * index)) & 0xFF) for index in range(4)).strip("\x00 ")
+            if not codec.isprintable():
+                codec = ""
+            success = read_failures == 0
+            return {
+                "success": success,
+                "state": "CONNECTED" if success else "DEGRADED",
+                "decode_status": "PASS" if success else "PARTIAL",
+                "resolution": f"{width}x{height}",
+                "fps": round(max(0, frames_decoded - 1) / sample_elapsed, 2),
+                "reported_fps": round(reported_fps, 2) if np.isfinite(reported_fps) else 0.0,
+                "codec": codec or "UNKNOWN",
+                "frames_decoded": frames_decoded,
+                "read_failures": read_failures,
+                "first_frame_ms": first_frame_ms,
+                "test_duration_ms": round((time.perf_counter() - started_at) * 1000, 1),
+                "error": None if success else "A frame read failed during the decode sample.",
+            }
+        finally:
+            cap.release()
+
     def _open_capture(self) -> Optional[cv2.VideoCapture]:
         """Attempts to open OpenCV VideoCapture for the configured source with fallback."""
         logger.info(f"[{self.camera_id}] Connecting to: {self.sanitized_source}")
@@ -348,7 +433,7 @@ class CameraWorker:
                         self._frame_height = frame.shape[0]
 
             except Exception as exc:
-                err_text = f"Connection error: {str(exc)}"
+                err_text = f"Connection error: {sanitize_rtsp_url(str(exc))}"
                 logger.error(f"[{self.camera_id}] {err_text}")
                 self._set_state(ConnectionState.ERROR, error_msg=err_text)
 

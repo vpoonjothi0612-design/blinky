@@ -59,8 +59,8 @@ async function resetDatabase() {
       id: uuidv4(),
       name: "CAM-01 (Exit Gate)",
       location: "Exit Gate (OUT)",
-      ipAddress: "192.168.15.56",
-      rtspUrl: "rtsps://admin:Champ%403841@192.168.15.56:554/video/live?channel=1&subtype=1&unicast=true&proto=Onvif",
+      ipAddress: process.env.CAMERA_1_IP || null,
+      rtspUrl: null,
       status: "ACTIVE",
     });
     console.log(`  ✓ Registered: ${cam1.name} [${cam1.ipAddress}] -> OUT`);
@@ -69,8 +69,8 @@ async function resetDatabase() {
       id: uuidv4(),
       name: "CAM-02 (Entry Gate)",
       location: "Entry Gate (IN)",
-      ipAddress: "192.168.15.57",
-      rtspUrl: "rtsps://admin:Champ%403841@192.168.15.57:554/video/live?channel=1&subtype=1&unicast=true&proto=Onvif",
+      ipAddress: process.env.CAMERA_2_IP || null,
+      rtspUrl: null,
       status: "ACTIVE",
     });
     console.log(`  ✓ Registered: ${cam2.name} [${cam2.ipAddress}] -> IN`);

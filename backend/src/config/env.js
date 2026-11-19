@@ -7,12 +7,18 @@ const resolveCameraApiUrl = () => {
   const raw =
     process.env.CAMERA_API_URL ||
     process.env.CAMERA_API ||
-    process.env["CAMERA API"] ||
-    "http://192.168.15.57/cpapi/AlarmMaster?action=attach&codes=%5bFaceDetection%5d";
+    process.env["CAMERA API"];
 
-  // Clean trailing dots and trim
-  return raw.trim().replace(/\.+$/, "");
+  if (raw) return raw.trim().replace(/\.+$/, "");
+
+  const cameraIp = process.env.CAMERA_IP || process.env.CAMERA_2_IP || process.env.CAMERA_1_IP;
+  return cameraIp
+    ? `http://${cameraIp}/cpapi/AlarmMaster?action=attach&codes=%5bFaceDetection%5d`
+    : "";
 };
+
+const cameraIp = process.env.CAMERA_IP || process.env.CAMERA_2_IP || process.env.CAMERA_1_IP || "";
+const cameraApiUrl = resolveCameraApiUrl();
 
 export const config = {
   port: process.env.PORT || 3000,
@@ -26,23 +32,21 @@ export const config = {
   aiVideoTimeout: parseInt(process.env.AI_VIDEO_TIMEOUT, 10) || 1800000,
 
   // CP PLUS / Dahua Camera Configuration
-  nvrIp: process.env.NVR_IP || "192.168.15.55",
-  camera1Ip: process.env.CAMERA_1_IP || "192.168.15.56",
-  camera2Ip: process.env.CAMERA_2_IP || "192.168.15.57",
-  cameraApiUrl: resolveCameraApiUrl(),
-  cameraIp: process.env.CAMERA_IP || "192.168.15.57",
-  cameraUsername: process.env.CAMERA_USERNAME || "admin",
+  nvrIp: process.env.NVR_IP || "",
+  camera1Ip: process.env.CAMERA_1_IP || "",
+  camera2Ip: process.env.CAMERA_2_IP || "",
+  cameraApiUrl,
+  cameraIp,
+  cameraUsername: process.env.CAMERA_USERNAME || "",
   cameraPassword: process.env.CAMERA_PASSWORD || "",
   cameraChannel: parseInt(process.env.CAMERA_CHANNEL, 10) || 1,
-  cameraAutoStart: process.env.CAMERA_AUTO_START !== "false",
+  cameraAutoStart: Boolean(cameraApiUrl) && process.env.CAMERA_AUTO_START !== "false",
   cameraReconnectInterval:
     parseInt(process.env.CAMERA_RECONNECT_INTERVAL_MS, 10) || 10000,
-  cameraSnapshotUrl:
-    process.env.CAMERA_SNAPSHOT_URL ||
-    `http://${process.env.CAMERA_IP || "192.168.15.57"}/cgi-bin/snapshot.cgi?channel=1`,
-  cameraRtspUrl:
-    process.env.CAMERA_RTSP_URL ||
-    `rtsp://${process.env.CAMERA_IP || "192.168.15.57"}:554/cam/realmonitor?channel=1&subtype=0`,
+  cameraSnapshotUrl: process.env.CAMERA_SNAPSHOT_URL ||
+    (cameraIp ? `http://${cameraIp}/cgi-bin/snapshot.cgi?channel=1` : ""),
+  cameraRtspUrl: process.env.CAMERA_RTSP_URL ||
+    (cameraIp ? `rtsp://${cameraIp}:554/cam/realmonitor?channel=1&subtype=0` : ""),
 };
 
 export default config;

@@ -1,5 +1,8 @@
-const HUMAN_ORIENTATIONS = new Set(["FRONT", "LEFT", "RIGHT", "BACK", "UNKNOWN"]);
-const HUMAN_IMAGE_ANGLES = new Set(["FRONT", "LEFT", "RIGHT"]);
+const HUMAN_ORIENTATIONS = new Set([
+  "FRONT", "FRONT_LEFT", "FRONT_RIGHT", "LEFT_PROFILE", "RIGHT_PROFILE",
+  "LEFT", "RIGHT", "BACK", "UNKNOWN", "UNKNOWN_ORIENTATION",
+]);
+const HUMAN_IMAGE_ANGLES = new Set(["FRONT", "FRONT_LEFT", "FRONT_RIGHT", "LEFT_PROFILE", "RIGHT_PROFILE", "LEFT", "RIGHT"]);
 const VEHICLE_ANGLES = new Set(["FRONT", "LEFT", "RIGHT", "REAR", "TOP", "UNKNOWN"]);
 const VEHICLE_IMAGE_ANGLES = new Set(["FRONT", "LEFT", "RIGHT", "REAR"]);
 
@@ -28,7 +31,7 @@ export const mapViewMetadata = (metadata = {}) => {
   const vehicleAngle = normalizeLabel(metadata.vehicleAngle, VEHICLE_ANGLES);
   return {
     human_orientation: humanOrientation,
-    human_orientation_confidence: humanOrientation === "UNKNOWN" ? null : normalizeConfidence(metadata.humanOrientationConfidence),
+    human_orientation_confidence: ["UNKNOWN", "UNKNOWN_ORIENTATION"].includes(humanOrientation) ? null : normalizeConfidence(metadata.humanOrientationConfidence),
     human_angle_images: normalizeImages(metadata.humanAngleImages, HUMAN_IMAGE_ANGLES),
     vehicle_angle: vehicleAngle,
     vehicle_angle_confidence: vehicleAngle === "UNKNOWN" ? null : normalizeConfidence(metadata.vehicleAngleConfidence),

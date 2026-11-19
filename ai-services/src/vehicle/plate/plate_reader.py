@@ -48,6 +48,8 @@ def _empty_result(status: str = "not_found", raw_text: str = "") -> Dict[str, An
         "confidence": 0.0,
         "status": status,
         "plate_crop_path": None,
+        "_plate_crop": None,
+        "_frame_token": None,
         "raw_text": raw_text,
         "_sharpness": 0.0,
         "_variant": "none",
@@ -487,20 +489,6 @@ def _log_result(track_id: Any, raw: str, cleaned: str, confidence: float, varian
         logger.debug("Could not append plate OCR CSV log", exc_info=True)
 
 
-def _save_plate_crop(crop: np.ndarray, track_id: Any) -> Optional[str]:
-    try:
-        config.PLATE_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        safe_track = re.sub(r"[^A-Za-z0-9_-]", "_", str(track_id if track_id is not None else "na"))
-        filename = f"plate_{stamp}_track{safe_track}.jpg"
-        target = config.PLATE_DEBUG_DIR / filename
-        if cv2.imwrite(str(target), crop):
-            return str(Path("debug") / "plates" / filename)
-    except Exception:
-        logger.debug("Could not save plate candidate", exc_info=True)
-    return None
-
-
 def _expand_evidence_box(image: np.ndarray, box: Tuple[int, int, int, int]) -> np.ndarray:
     """Keep the complete horizontal plate visible when a contour is tight."""
     height, width = image.shape[:2]
@@ -566,7 +554,7 @@ def _find_context_plate_box(image: np.ndarray) -> Optional[Tuple[int, int, int, 
 
 
 def recognize_plate(vehicle_crop: np.ndarray, track_id: Any = None, evidence_crop: Optional[np.ndarray] = None) -> Dict[str, Any]:
-    """Recognize using the existing vehicle crop and optionally save padded plate evidence."""
+    """Recognize a localized plate and retain its crop in memory for track voting."""
     try:
         if vehicle_crop is None or not isinstance(vehicle_crop, np.ndarray) or vehicle_crop.size == 0:
             return _empty_result()
@@ -587,15 +575,14 @@ def recognize_plate(vehicle_crop: np.ndarray, track_id: Any = None, evidence_cro
         context_box = _find_context_plate_box(evidence_image)
         context_evidence = _expand_evidence_box(evidence_image, context_box) if context_box else None
         context_sharpness = 0.0
-        evidence_path = None
         if context_evidence is not None and context_evidence.size:
             context_sharpness = float(cv2.Laplacian(cv2.cvtColor(context_evidence, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var())
-            evidence_path = _save_plate_crop(context_evidence, track_id)
         boxes = _detect_candidates(image)
         if not boxes:
-            if evidence_path:
+            if context_evidence is not None and context_evidence.size:
                 return {
-                    **_empty_result(), "plate_crop_path": evidence_path, "_sharpness": context_sharpness,
+                    **_empty_result(), "_plate_crop": context_evidence, "_plate_bbox": list(context_box),
+                    "_sharpness": context_sharpness,
                 }
             return _empty_result()
 
@@ -619,13 +606,14 @@ def recognize_plate(vehicle_crop: np.ndarray, track_id: Any = None, evidence_cro
             if ocr_crop.shape[1] < config.PLATE_MIN_CROP_WIDTH:
                 continue
             sharpness = float(cv2.Laplacian(cv2.cvtColor(ocr_crop, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var())
-            evidence_sharpness = context_sharpness if evidence_path else sharpness
-            # Save each plausible crop, including crops whose OCR is poor, for
-            # later review/training and keep trying rather than failing quality.
-            crop_path = evidence_path or _save_plate_crop(_expand_evidence_box(image, (x1, y1, x2, y2)), track_id)
+            evidence_crop_candidate = (
+                context_evidence if context_evidence is not None and context_evidence.size
+                else _expand_evidence_box(image, (x1, y1, x2, y2))
+            )
+            evidence_sharpness = context_sharpness if context_evidence is not None else sharpness
             if best_fallback is None or evidence_sharpness > best_fallback["_sharpness"]:
                 best_fallback = {
-                    **_empty_result(), "plate_crop_path": crop_path, "_sharpness": evidence_sharpness,
+                    **_empty_result(), "_plate_crop": evidence_crop_candidate, "_sharpness": evidence_sharpness,
                     "_plate_bbox": [x1, y1, x2, y2],
                 }
             for variant_name, variant in _preprocess_variants(ocr_crop):
@@ -650,7 +638,11 @@ def recognize_plate(vehicle_crop: np.ndarray, track_id: Any = None, evidence_cro
                     continue
                 valid = _validate(cleaned)
                 if valid:
-                    status = "ok" if confidence >= config.PLATE_MIN_VALID_CONFIDENCE else "low_confidence"
+                    raw_cleaned = _clean_text(raw)
+                    if cleaned != raw_cleaned:
+                        status = "pending_verification"
+                    else:
+                        status = "ok" if confidence >= config.PLATE_MIN_VALID_CONFIDENCE else "low_confidence"
                     plate_text = cleaned
                 else:
                     status = "invalid_format"
@@ -662,7 +654,8 @@ def recognize_plate(vehicle_crop: np.ndarray, track_id: Any = None, evidence_cro
                     "plate_text": plate_text,
                     "confidence": float(min(max(confidence, 0.0), 1.0)),
                     "status": status,
-                    "plate_crop_path": crop_path,
+                    "plate_crop_path": None,
+                    "_plate_crop": evidence_crop_candidate,
                     "raw_text": raw,
                     "_sharpness": evidence_sharpness,
                     "_variant": variant_name,
@@ -709,12 +702,8 @@ class PlateVoter:
                 return dict(self._locked[track_id])
             self._results[track_id].append(dict(result))
             final = self._select(track_id)
-            text = final.get("plate_text") if final else None
-            if text:
-                winner_count = sum(1 for item in self._results[track_id] if item.get("plate_text") == text)
-                confidence = float(final.get("confidence", 0.0))
-                if winner_count >= self.lock_count and final.get("status") == "ok" and confidence >= PLATE_MIN_VALID_CONFIDENCE:
-                    self._locked[track_id] = dict(final)
+            if final and final.get("_confirmed"):
+                self._locked[track_id] = dict(final)
             return final
 
     def _select(self, track_id: Any) -> Optional[Dict[str, Any]]:
@@ -723,15 +712,44 @@ class PlateVoter:
             return None
         text_rows = [row for row in rows if row.get("plate_text")]
         if not text_rows:
-            return max(rows, key=lambda row: float(row.get("_sharpness", 0.0)))
-        counts = Counter(row.get("plate_text") for row in text_rows)
-        winning_text = max(counts, key=lambda text: (counts[text], max(float(row.get("confidence", 0.0)) for row in text_rows if row.get("plate_text") == text)))
-        winning_rows = [row for row in text_rows if row.get("plate_text") == winning_text]
+            final = dict(max(rows, key=lambda row: float(row.get("_sharpness", 0.0))))
+            final["_confirmed"] = False
+            return final
+
+        qualified_rows = [
+            row for row in text_rows
+            if row.get("status") == "ok"
+            and float(row.get("confidence", 0.0)) >= config.PLATE_MIN_VALID_CONFIDENCE
+            and row.get("_plate_bbox") is not None
+            and _validate(_clean_text(row.get("plate_text")))
+        ]
+        vote_rows = qualified_rows or text_rows
+        counts = Counter(row.get("plate_text") for row in vote_rows)
+        winning_text = max(
+            counts,
+            key=lambda text: (
+                counts[text],
+                max(float(row.get("confidence", 0.0)) for row in vote_rows if row.get("plate_text") == text),
+            ),
+        )
+        winning_rows = [row for row in vote_rows if row.get("plate_text") == winning_text]
         best_read = max(winning_rows, key=lambda row: (float(row.get("confidence", 0.0)), float(row.get("_sharpness", 0.0))))
         sharpest = max(winning_rows, key=lambda row: float(row.get("_sharpness", 0.0)))
         final = dict(best_read)
-        final["plate_crop_path"] = sharpest.get("plate_crop_path") or best_read.get("plate_crop_path")
+        final["plate_crop_path"] = None
+        final["_plate_crop"] = sharpest.get("_plate_crop")
+        final["_frame_token"] = sharpest.get("_frame_token")
         final["_sharpness"] = float(sharpest.get("_sharpness", 0.0))
+        winner_count = sum(1 for row in qualified_rows if row.get("plate_text") == winning_text)
+        confirmed = bool(
+            qualified_rows
+            and winner_count >= self.lock_count
+            and final.get("status") == "ok"
+            and float(final.get("confidence", 0.0)) >= config.PLATE_MIN_VALID_CONFIDENCE
+        )
+        if not confirmed and final.get("status") == "ok":
+            final["status"] = "pending_verification"
+        final["_confirmed"] = confirmed
         return final
 
     def get_final(self, track_id: Any) -> Optional[Dict[str, Any]]:

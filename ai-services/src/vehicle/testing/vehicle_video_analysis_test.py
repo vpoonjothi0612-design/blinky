@@ -6,7 +6,7 @@ Validates all 13 production criteria:
 3. Multiple vehicle classes (car, motorcycle, bus, truck)
 4. Multi-object tracking with ByteTrack (stable track IDs)
 5. Readable number plate recognition with real PaddleOCR
-6. Unreadable number plate handling (safe nulls, ocrStatus="PLATE_NOT_RECOGNIZED")
+6. Unreadable or unconfirmed plate handling (safe nulls and explicit OCR status)
 7. Low OCR confidence gating (rejection below threshold, never guess)
 8. Vehicle without number plate handling
 9. Timestamp generation (videoTimestamp "HH:MM:SS.mmm", processedAt ISO-8601)
@@ -55,12 +55,22 @@ from vehicle.plate.plate_recognizer import (
     NumberPlatePipeline,
     MockPlateOCR,
     PaddleOCREngine,
+    BasePlateDetector,
+    NullPlateDetector,
 )
 from vehicle.service.vehicle_video_service import (
     VehicleVideoAnalysisService,
     format_video_timestamp,
     format_duration,
 )
+
+
+class FixedPlateDetector(BasePlateDetector):
+    def detect_plate(self, vehicle_crop):
+        height, width = vehicle_crop.shape[:2]
+        if width < 40 or height < 30:
+            return None, 0.0
+        return (10, 10, width - 10, height - 10), 0.95
 
 
 def run_video_analysis_test_suite() -> bool:
@@ -146,7 +156,7 @@ def run_video_analysis_test_suite() -> bool:
     print("------------------------------------------------------------")
     # A. High confidence mock plate
     mock_engine_success = MockPlateOCR(canned_plate="MH12AB1234", confidence=0.98)
-    pipe_success = NumberPlatePipeline(ocr_engine=mock_engine_success)
+    pipe_success = NumberPlatePipeline(detector=FixedPlateDetector(), ocr_engine=mock_engine_success)
     dummy_crop = np.zeros((100, 200, 3), dtype=np.uint8)
     res_success = pipe_success.process_vehicle_crop(dummy_crop)
 
@@ -156,16 +166,29 @@ def run_video_analysis_test_suite() -> bool:
 
     # B. OCR Failure / unreadable plate
     mock_engine_fail = MockPlateOCR(simulate_failure=True)
-    pipe_fail = NumberPlatePipeline(ocr_engine=mock_engine_fail)
+    pipe_fail = NumberPlatePipeline(detector=FixedPlateDetector(), ocr_engine=mock_engine_fail)
     res_fail = pipe_fail.process_vehicle_crop(dummy_crop)
 
     assert res_fail.plate_text is None
     assert res_fail.confidence is None
     assert res_fail.ocr_status == "PLATE_NOT_RECOGNIZED"
 
+    # C. No localized plate must not OCR a guessed lower-vehicle region.
+    pipe_no_detection = NumberPlatePipeline(
+        detector=NullPlateDetector(),
+        ocr_engine=mock_engine_success,
+    )
+    res_no_detection = pipe_no_detection.process_vehicle_crop(dummy_crop)
+    assert res_no_detection.detected is False
+    assert res_no_detection.plate_bbox is None
+    assert res_no_detection.plate_crop is None
+    assert res_no_detection.plate_text is None
+    assert res_no_detection.ocr_status == "PLATE_NOT_DETECTED"
+
     test_results["OCR Gating & Never Guess"] = "PASS"
     print("  High confidence OCR returned plate:", res_success.plate_text, f"({res_success.confidence})")
     print("  Unreadable OCR returned null plate:", res_fail.plate_text, f"status={res_fail.ocr_status}")
+    print("  Missing localization returned no plate crop:", res_no_detection.plate_crop)
     print("  Result: PASS")
 
     # -------------------------------------------------------------------------
@@ -239,8 +262,13 @@ def run_video_analysis_test_suite() -> bool:
     print(f"  [OK] Number of plates rejected / unreadable: {len(unreadable_plates)}")
     for up in unreadable_plates[:3]:
         assert up["numberPlate"] is None
-        assert up["plateConfidence"] is None
-        assert up["ocrStatus"] == "PLATE_NOT_RECOGNIZED"
+        assert up["ocrStatus"] in {
+            "PLATE_NOT_RECOGNIZED",
+            "PLATE_NOT_DETECTED",
+            "LOW_CONFIDENCE",
+            "PENDING_VERIFICATION",
+            "INVALID_FORMAT",
+        }
 
     # 7. Line crossing events
     print(f"  [OK] Line crossing events generated: {len(events)}")

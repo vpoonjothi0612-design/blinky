@@ -11,6 +11,7 @@ import {
   startStream,
   stopStream,
   testStreamConnection,
+  testRtspCamera,
   getStreamEvents,
   getSnapshot,
   getLiveCameraStream,
@@ -48,6 +49,13 @@ router.post(
   authenticate,
   authorize("ADMIN", "SECURITY"),
   testStreamConnection
+);
+
+router.get(
+  "/rtsp-test/:cameraId",
+  authenticate,
+  authorize("ADMIN", "SECURITY"),
+  testRtspCamera
 );
 
 router.get(

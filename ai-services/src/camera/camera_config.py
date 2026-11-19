@@ -32,11 +32,11 @@ def sanitize_rtsp_url(url: str | int) -> str:
     """Masks credentials in RTSP URLs to prevent sensitive password exposure in logs.
 
     Examples:
-        'rtsp://admin:Champ%403841@192.168.15.56:554/cam/realmonitor?channel=1&subtype=1'
-        -> 'rtsp://admin:***@192.168.15.56:554/cam/realmonitor?channel=1&subtype=1'
+        'rtsp://camera-user:example-password@camera-1.example:554/cam/realmonitor?channel=1&subtype=1'
+        -> 'rtsp://camera-user:***@camera-1.example:554/cam/realmonitor?channel=1&subtype=1'
 
-        'rtsp://admin:pass@192.168.15.57:554/stream'
-        -> 'rtsp://admin:***@192.168.15.57:554/stream'
+        'rtsp://camera-user:example-password@camera-2.example:554/stream'
+        -> 'rtsp://camera-user:***@camera-2.example:554/stream'
 
     Args:
         url: RTSP URL string or camera index.
@@ -64,10 +64,10 @@ class CameraConfig:
     """Configuration specification for an IP or USB camera."""
 
     camera_id: str             # e.g., "CAM-01", "CAM-02"
-    name: str                  # Human-readable name, e.g. "CP PLUS Entrance (192.168.15.56)"
-    ip: str                    # e.g., "192.168.15.56"
+    name: str                  # Human-readable camera name.
+    ip: str                    # Camera IP from local environment configuration.
     port: int = 554            # Default RTSP port: 554
-    username: str = "admin"
+    username: str = ""
     password: str = ""
     channel: int = 1           # Channel 1
     subtype: int = 0           # 0 = Main-stream (high-resolution), 1 = Sub-stream
@@ -154,7 +154,7 @@ def load_camera_config_from_env(camera_num: int) -> Optional[CameraConfig]:
 
     camera_id = f"CAM-0{camera_num}"
     name = f"CP PLUS Camera {camera_num} ({ip})"
-    username = os.environ.get(f"{prefix}USERNAME", "admin").strip()
+    username = os.environ.get(f"{prefix}USERNAME", "").strip()
     password = os.environ.get(f"{prefix}PASSWORD", "").strip()
     port = int(os.environ.get(f"{prefix}RTSP_PORT", "554"))
     subtype = int(os.environ.get(f"{prefix}STREAM_SUBTYPE", "0"))

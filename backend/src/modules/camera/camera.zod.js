@@ -1,5 +1,20 @@
 import { z } from "zod";
 
+const rtspUrlSchema = z
+  .string()
+  .trim()
+  .optional()
+  .nullable()
+  .refine((value) => {
+    if (!value) return true;
+    try {
+      const url = new URL(value);
+      return !url.username && !url.password;
+    } catch {
+      return !/^rtsps?:\/\/[^/]*@/i.test(value);
+    }
+  }, "Do not embed camera credentials in the RTSP URL; configure them in the AI service environment.");
+
 export const createCameraSchema = z.object({
   name: z
     .string()
@@ -18,11 +33,7 @@ export const createCameraSchema = z.object({
     .optional()
     .nullable(),
 
-  rtspUrl: z
-    .string()
-    .trim()
-    .optional()
-    .nullable(),
+  rtspUrl: rtspUrlSchema,
 
   status: z
     .enum(["ACTIVE", "INACTIVE"])
@@ -48,11 +59,7 @@ export const updateCameraSchema = z.object({
     .optional()
     .nullable(),
 
-  rtspUrl: z
-    .string()
-    .trim()
-    .optional()
-    .nullable(),
+  rtspUrl: rtspUrlSchema,
 
   status: z
     .enum(["ACTIVE", "INACTIVE"])

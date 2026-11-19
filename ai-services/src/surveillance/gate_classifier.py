@@ -17,11 +17,10 @@ import json
 import logging
 import os
 import re
-import shutil
 import sys
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -99,7 +98,11 @@ UPSCALE_PERSON_CROP = os.environ.get("UPSCALE_PERSON_CROP", "false").lower() in 
 FACE_MIN_SHARPNESS = float(os.environ.get("FACE_MIN_SHARPNESS_LIVE", "6.0"))
 FACE_MIN_BRIGHTNESS = float(os.environ.get("FACE_MIN_BRIGHTNESS", "45.0"))
 FACE_MAX_BRIGHTNESS = float(os.environ.get("FACE_MAX_BRIGHTNESS", "220.0"))
-FACE_MAX_YAW_DEG = float(os.environ.get("FACE_MAX_YAW_DEG", "35"))
+FACE_MAX_YAW_DEG = float(os.environ.get("FACE_MAX_YAW_DEG", "65"))
+FACE_FRONTAL_YAW_DEG = 12.0
+FACE_PROFILE_YAW_DEG = 45.0
+FACE_RECOGNITION_MIN_INTERVAL_SEC = max(0.0, float(os.environ.get("FACE_RECOGNITION_MIN_INTERVAL_SEC", "0.20")))
+TRACK_DEBUG_SNAPSHOT_INTERVAL_SEC = max(0.1, float(os.environ.get("TRACK_DEBUG_SNAPSHOT_INTERVAL_SEC", "1.0")))
 FACE_MIN_PITCH_DEG = float(os.environ.get("FACE_MIN_PITCH_DEG", "-20"))
 FACE_MAX_PITCH_DEG = float(os.environ.get("FACE_MAX_PITCH_DEG", "25"))
 FACE_EARLY_DECISION_SCORE = float(os.environ.get("FACE_EARLY_DECISION_SCORE", "0.86"))
@@ -151,9 +154,9 @@ def estimate_yunet_pose(landmarks: np.ndarray, face_height: int) -> Tuple[float,
     """Estimate approximate yaw/pitch degrees from YuNet's five landmarks.
 
     YuNet does not expose a 3-D pose vector. These normalized landmark ratios
-    are deliberately used as a conservative gate, with limits configurable per
-    deployment; yaw is reliable enough to catch profile views and pitch catches
-    faces angled down toward a phone.
+    are deliberately used as a pose estimate, with limits configurable per
+    deployment; yaw separates frontal, diagonal, and profile views while pitch
+    rejects faces angled too far up or down for reliable matching.
     """
     points = np.asarray(landmarks, dtype=np.float32).reshape(5, 2)
     eye_mid = (points[0] + points[1]) * 0.5
@@ -162,6 +165,21 @@ def estimate_yunet_pose(landmarks: np.ndarray, face_height: int) -> Tuple[float,
     nose_eye_ratio = float(points[2, 1] - eye_mid[1]) / max(float(face_height), 1.0)
     pitch = (nose_eye_ratio - 0.36) * 120.0
     return yaw, pitch
+
+
+def classify_face_orientation(yaw_deg: float, max_yaw_deg: float = FACE_MAX_YAW_DEG) -> str:
+    """Classify visible face direction from YuNet's signed yaw estimate."""
+    if not np.isfinite(yaw_deg):
+        return "UNKNOWN_ORIENTATION"
+    yaw_magnitude = abs(float(yaw_deg))
+    if yaw_magnitude > max_yaw_deg:
+        return "UNKNOWN_ORIENTATION"
+    if yaw_magnitude <= FACE_FRONTAL_YAW_DEG:
+        return "FRONT"
+    direction = "LEFT" if yaw_deg < 0 else "RIGHT"
+    if yaw_magnitude >= FACE_PROFILE_YAW_DEG:
+        return f"{direction}_PROFILE"
+    return f"FRONT_{direction}"
 
 
 def score_face_observation(
@@ -180,6 +198,16 @@ def score_face_observation(
     light = max(0.0, 1.0 - abs(brightness - 132.0) / 132.0)
     detector = min(max(face_detector_score, 0.0), 1.0)
     return float(0.35 * size + 0.25 * pose + 0.22 * blur + 0.13 * light + 0.05 * detector)
+
+
+def score_vehicle_capture(image: Optional[np.ndarray]) -> Tuple[float, float, int]:
+    if image is None or image.size == 0:
+        return (0.0, 0.0, 0)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    brightness = float(gray.mean())
+    exposure_balance = min(brightness, 255.0 - brightness)
+    return (sharpness, exposure_balance, int(image.shape[0] * image.shape[1]))
 
 
 def crop_face_passport(frame: np.ndarray, face_bbox: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
@@ -273,6 +301,7 @@ class ObjectTrack:
         self.missed_frames: int = 0
         self.event_triggered: bool = False
         self.first_seen: float = time.time()
+        self.capture_id: str = f"{int(self.first_seen * 1000000)}_{track_id}"
         self.last_seen: float = time.time()
 
         # Face analysis cache (for PERSON)
@@ -282,6 +311,8 @@ class ObjectTrack:
         self.best_review_face: Optional[FaceCandidate] = None
         self.face_evaluated: bool = False
         self.face_evaluated_count: int = 0
+        self.current_face_candidate: Optional[FaceCandidate] = None
+        self.last_face_recognition_at: Optional[float] = None
         self.face_state: str = "PERSON_TRACKED"
         self.face_reason: str = "Body detected; awaiting a visible face"
         self.face_rejection_history: deque[Tuple[str, str]] = deque(maxlen=50)
@@ -309,13 +340,17 @@ class ObjectTrack:
         self.similarity: Optional[float] = None
         self.last_saved_face_fname: Optional[str] = None
         self.last_saved_quality: float = 0.0
-        self.human_orientation: str = "UNKNOWN"
+        self.human_orientation: str = "UNKNOWN_ORIENTATION"
         self.human_orientation_confidence: Optional[float] = None
         self.best_human_view_images = BestViewCaptureRegistry(HUMAN_CAPTURE_ORIENTATIONS)
 
         # Vehicle analysis cache (for VEHICLE)
         self.best_vehicle_crop: Optional[np.ndarray] = None
         self.best_vehicle_area: int = 0
+        self.best_vehicle_quality: Tuple[float, float, int] = (0.0, 0.0, 0)
+        self.vehicle_observation_frames: OrderedDict[int, np.ndarray] = OrderedDict()
+        self.vehicle_snapshot_fname: Optional[str] = None
+        self.original_frame_fname: Optional[str] = None
         self.plate_evaluated: bool = False
         self.plate_text: Optional[str] = None
         self.raw_plate_text: Optional[str] = None
@@ -435,6 +470,7 @@ class GateObjectClassifierPipeline:
         self.face_max_yaw_deg = float(zone_config.get("face_max_yaw_deg", FACE_MAX_YAW_DEG))
         self.face_min_pitch_deg = float(zone_config.get("face_min_pitch_deg", FACE_MIN_PITCH_DEG))
         self.face_max_pitch_deg = float(zone_config.get("face_max_pitch_deg", FACE_MAX_PITCH_DEG))
+        self.face_recognition_min_interval_sec = FACE_RECOGNITION_MIN_INTERVAL_SEC
 
         # Active tracks
         self.tracks: Dict[int, ObjectTrack] = {}
@@ -445,6 +481,7 @@ class GateObjectClassifierPipeline:
         self.cooldown_cache: Dict[str, float] = {}
         self.face_size_history: deque[Tuple[int, int]] = deque(maxlen=200)
         self.face_size_observation_count = 0
+        self._last_debug_snapshot_at = 0.0
         self.plate_voter = PlateVoter()
         self.debug_dir = DATA_DIR / "debug"
         self.debug_dir.mkdir(parents=True, exist_ok=True)
@@ -699,6 +736,10 @@ class GateObjectClassifierPipeline:
         threading.Thread(target=_post, daemon=True).start()
 
     def _write_track_debug_snapshot(self) -> None:
+        now = time.monotonic()
+        if now - self._last_debug_snapshot_at < TRACK_DEBUG_SNAPSHOT_INTERVAL_SEC:
+            return
+        self._last_debug_snapshot_at = now
         path = self.debug_dir / f"face_tracks_{self.camera_id}.json"
         payload = {
             "camera_id": self.camera_id,
@@ -844,6 +885,8 @@ class GateObjectClassifierPipeline:
                     del self.tracks[tid]
 
         # 4. Process categorized tracks according to rules
+        frame_faces_checked = False
+        frame_faces_cache: Optional[np.ndarray] = None
         for tid, track in list(self.tracks.items()):
             # Do not crop the current background through a stale person box.
             # Keep the last image from a real detection and wait for the next
@@ -886,6 +929,8 @@ class GateObjectClassifierPipeline:
                     track.face_reason = "Body detected; checking for a usable face"
                 track.current_face_bbox = None
                 track.current_face_landmarks = None
+                track.current_face_candidate = None
+                track.set_human_orientation("UNKNOWN_ORIENTATION")
 
                 if person_crop.size > 0 and yunet_detector_fn is not None:
                     # Prefer native high-resolution camera pixels; upscaling is only an
@@ -898,7 +943,10 @@ class GateObjectClassifierPipeline:
                     # If a tight/shifted body box hides the face, run YuNet once on
                     # the native full frame and keep only faces inside this person crop.
                     if faces is None or len(faces) == 0:
-                        frame_faces = yunet_detector_fn(frame)
+                        if not frame_faces_checked:
+                            frame_faces_cache = yunet_detector_fn(frame)
+                            frame_faces_checked = True
+                        frame_faces = frame_faces_cache
                         if frame_faces is not None and len(frame_faces) > 0:
                             local_faces = []
                             for frame_face in frame_faces:
@@ -927,6 +975,13 @@ class GateObjectClassifierPipeline:
                             local_landmarks = face[4:14].reshape((5, 2)).astype(np.float32)
                             face_box, global_landmarks = map_yunet_face_to_frame(face, (px1, py1), scale)
                             ffx, ffy, fw, fh = face_box
+                            face_center_x = ffx + fw * 0.5
+                            face_center_y = ffy + fh * 0.5
+                            if not (x1 <= face_center_x <= x2 and y1 <= face_center_y <= y2):
+                                continue
+                            yaw_deg, pitch_deg = estimate_yunet_pose(local_landmarks, int(face[3]))
+                            orientation = classify_face_orientation(yaw_deg, self.face_max_yaw_deg)
+                            track.set_human_orientation(orientation)
                             track.current_face_bbox = face_box
                             track.current_face_landmarks = global_landmarks
                             track.face_size_samples.append((fw, fh))
@@ -946,19 +1001,26 @@ class GateObjectClassifierPipeline:
                             if fw < self.face_min_px or fh < self.face_min_px:
                                 if not track.employee_id and not track.unknown_reported:
                                     track.note_face_rejection("FACE_TOO_SMALL", f"Face is {fw}x{fh}px; camera minimum is {self.face_min_px}px (move closer)")
-                                    yaw_deg, pitch_deg = estimate_yunet_pose(local_landmarks, fh)
                                     detector_score = float(face[-1]) if len(face) >= 15 else 0.8
                                     self._remember_rejected_face(track, frame, face_box, global_landmarks, detector_score, yaw_deg, pitch_deg)
                                 logger.info("[FaceDecision] camera=%s track=%s state=FACE_TOO_SMALL face_size=%dx%d minimum=%d", self.camera_id, tid, fw, fh, self.face_min_px)
                                 continue
 
-                            yaw_deg, pitch_deg = estimate_yunet_pose(local_landmarks, int(face[3]))
-                            if abs(yaw_deg) > self.face_max_yaw_deg or pitch_deg < self.face_min_pitch_deg or pitch_deg > self.face_max_pitch_deg:
+                            if ffx < 0 or ffy < 0 or ffx + fw > w or ffy + fh > h:
+                                if not track.employee_id and not track.unknown_reported:
+                                    track.note_face_rejection("FACE_QUALITY_LOW", "Face extends beyond the camera frame")
+                                logger.info("[FaceDecision] camera=%s track=%s state=FACE_QUALITY_LOW reason=FACE_CLIPPED bbox=%s", self.camera_id, tid, face_box)
+                                continue
+
+                            pitch_tolerance = max(0.0, abs(yaw_deg) - FACE_FRONTAL_YAW_DEG) * 0.20
+                            min_pitch = self.face_min_pitch_deg - pitch_tolerance
+                            max_pitch = self.face_max_pitch_deg + pitch_tolerance
+                            if abs(yaw_deg) > self.face_max_yaw_deg or pitch_deg < min_pitch or pitch_deg > max_pitch:
                                 if not track.employee_id and not track.unknown_reported:
                                     track.note_face_rejection("FACE_TURNED_AWAY", f"Face turned away (yaw={yaw_deg:.1f}°, pitch={pitch_deg:.1f}°)")
                                     detector_score = float(face[-1]) if len(face) >= 15 else 0.8
                                     self._remember_rejected_face(track, frame, face_box, global_landmarks, detector_score, yaw_deg, pitch_deg)
-                                logger.info("[FaceDecision] camera=%s track=%s state=FACE_TURNED_AWAY yaw=%.1f pitch=%.1f limits=%.1f/%.1f..%.1f", self.camera_id, tid, yaw_deg, pitch_deg, self.face_max_yaw_deg, self.face_min_pitch_deg, self.face_max_pitch_deg)
+                                logger.info("[FaceDecision] camera=%s track=%s state=FACE_TURNED_AWAY yaw=%.1f pitch=%.1f limits=%.1f/%.1f..%.1f", self.camera_id, tid, yaw_deg, pitch_deg, self.face_max_yaw_deg, min_pitch, max_pitch)
                                 continue
 
                             face_crop_img = frame[max(0, ffy):min(h, ffy + fh), max(0, ffx):min(w, ffx + fw)]
@@ -992,6 +1054,11 @@ class GateObjectClassifierPipeline:
                                 brightness=brightness, yaw_deg=yaw_deg, pitch_deg=pitch_deg,
                             )
                             track.add_face_candidate(candidate)
+                            if (
+                                track.current_face_candidate is None
+                                or candidate.overall_quality > track.current_face_candidate.overall_quality
+                            ):
+                                track.current_face_candidate = candidate
                             track.best_face_score = max(track.best_face_score, quality)
                             track.best_face_reason = f"quality={quality:.3f}, yaw={yaw_deg:.1f}°, pitch={pitch_deg:.1f}°"
                             if track.face_state not in {"CONFIRMED", "UNKNOWN"}:
@@ -1023,55 +1090,68 @@ class GateObjectClassifierPipeline:
                             track.face_reason = "Temporarily outside the gate; exit confirmed after 5 seconds"
 
                 # Embed each retained high-scoring observation at most once. This
-                # makes the vote represent distinct frames while preserving the best
-                # usable face crops from the entire traversal.
-                if arcface_recognizer_fn is not None and track.best_face_crops:
-                    pending = [candidate for candidate in track.best_face_crops if not candidate.evaluated]
-                    if pending:
-                        candidate = max(pending, key=lambda item: item.overall_quality)
-                        try:
-                            result = arcface_recognizer_fn(candidate.crop, candidate.landmarks, frame, candidate.bbox, tid) or {}
-                        except Exception as ex:
-                            result = {"status": "LOW_QUALITY", "error": str(ex)}
-                        candidate.evaluated = True
-                        candidate.result = result
-                        track.face_evaluated_count += 1
-                        track.face_evaluated = True
+                # keeps each inference aligned to the candidate's source frame.
+                candidate = track.current_face_candidate
+                recognition_now = time.monotonic()
+                recognition_interval_elapsed = (
+                    track.last_face_recognition_at is None
+                    or recognition_now - track.last_face_recognition_at >= self.face_recognition_min_interval_sec
+                )
+                if (
+                    arcface_recognizer_fn is not None
+                    and candidate is not None
+                    and not candidate.evaluated
+                    and recognition_interval_elapsed
+                ):
+                    track.last_face_recognition_at = recognition_now
+                    try:
+                        result = arcface_recognizer_fn(candidate.crop, candidate.landmarks, frame, candidate.bbox, tid) or {}
+                    except Exception as ex:
+                        logger.error("[FaceDecision] camera=%s track=%s recognition inference failed: %s", self.camera_id, tid, ex)
+                        result = {"status": "RECOGNITION_ERROR", "error": str(ex)}
+                    candidate.evaluated = True
+                    candidate.result = result
+                    track.face_evaluated_count += 1
+                    track.face_evaluated = True
+                    registry_revision = result.get("registry_revision")
+                    if registry_revision is not None:
+                        if track.registry_revision is not None and registry_revision != track.registry_revision:
+                            # Votes and labels from the previous registry can
+                            # refer to a different best match after enrollment.
+                            track.face_identity_votes.clear()
+                            track.employee_id = None
+                            track.employee_name = None
+                            track.department = None
+                            track.similarity = None
+                            track.face_state = "FACE_EVALUATED"
+                            track.face_reason = "Enrollment registry changed; rechecking identity"
+                            logger.info(
+                                "[FaceDecision] camera=%s track=%s registry changed; cleared stale identity votes",
+                                self.camera_id, tid,
+                            )
+                        track.registry_revision = registry_revision
+                    employee_id = result.get("employee_id") if str(result.get("status", "")).startswith("RECOGNIZED") else None
+                    vote_status = str(result.get("status", "")).upper()
+                    if employee_id:
+                        vote = employee_id
+                    elif vote_status == "AMBIGUOUS":
+                        vote = "__AMBIGUOUS__"
+                    elif vote_status == "UNKNOWN":
+                        vote = "__UNKNOWN__"
+                    else:
+                        vote = "__DEFERRED__"
+                    track.face_identity_votes.append(vote)
+                    if vote_status == "RECOGNITION_ERROR" and not track.employee_id:
+                        track.face_state = "RECOGNITION_ERROR"
+                        track.face_reason = result.get("error") or "Face recognition inference failed"
+                    elif track.face_state not in {"CONFIRMED", "UNKNOWN"}:
                         track.face_state = "FACE_EVALUATED"
-                        registry_revision = result.get("registry_revision")
-                        if registry_revision is not None:
-                            if track.registry_revision is not None and registry_revision != track.registry_revision:
-                                # Votes and labels from the previous registry can
-                                # refer to a different best match after enrollment.
-                                track.face_identity_votes.clear()
-                                track.employee_id = None
-                                track.employee_name = None
-                                track.department = None
-                                track.similarity = None
-                                track.face_state = "FACE_EVALUATED"
-                                track.face_reason = "Enrollment registry changed; rechecking identity"
-                                logger.info(
-                                    "[FaceDecision] camera=%s track=%s registry changed; cleared stale identity votes",
-                                    self.camera_id, tid,
-                                )
-                            track.registry_revision = registry_revision
-                        employee_id = result.get("employee_id") if str(result.get("status", "")).startswith("RECOGNIZED") else None
-                        vote_status = str(result.get("status", "")).upper()
-                        if employee_id:
-                            vote = employee_id
-                        elif vote_status == "AMBIGUOUS":
-                            vote = "__AMBIGUOUS__"
-                        elif vote_status == "UNKNOWN":
-                            vote = "__UNKNOWN__"
-                        else:
-                            vote = "__DEFERRED__"
-                        track.face_identity_votes.append(vote)
-                        similarity = float(result.get("similarity") or 0.0)
-                        logger.info(
-                            "[FaceDecision] camera=%s track=%s best=%.4f second=%s threshold=%s state=%s face_score=%.3f top3=%s",
-                            self.camera_id, tid, similarity, result.get("second_similarity"), result.get("threshold"),
-                            result.get("status", "UNKNOWN"), candidate.overall_quality, result.get("rankings", [])[:3],
-                        )
+                    similarity = float(result.get("similarity") or 0.0)
+                    logger.info(
+                        "[FaceDecision] camera=%s track=%s best=%.4f second=%s threshold=%s state=%s face_score=%.3f top3=%s",
+                        self.camera_id, tid, similarity, result.get("second_similarity"), result.get("threshold"),
+                        result.get("status", "UNKNOWN"), candidate.overall_quality, result.get("rankings", [])[:3],
+                    )
 
                 identity_counts: Dict[str, int] = {}
                 for vote in track.face_identity_votes:
@@ -1097,6 +1177,7 @@ class GateObjectClassifierPipeline:
                     track.employee_id = confirmed_id
                     track.employee_name = rec_res.get("name", confirmed_id)
                     track.department = rec_res.get("department", "Operations")
+                    track.similarity = float(rec_res.get("similarity") or 0.0)
                     track.face_state = "CONFIRMED"
                     track.face_reason = f"Identity confirmed by {identity_counts[confirmed_id]} of the last 5 face observations"
                     if not track.event_triggered and (track.ever_in_gate or is_in_gate):
@@ -1110,9 +1191,9 @@ class GateObjectClassifierPipeline:
                                 "eventType": event_type, "event_type": event_type, "timestamp": now_iso,
                                 "employeeId": confirmed_id, "employee_id": confirmed_id, "employeeCode": confirmed_id,
                                 "name": track.employee_name, "department": track.department,
-                                "matchScore": float(rec_res.get("similarity") or 0.0), "match_score": float(rec_res.get("similarity") or 0.0),
+                                "matchScore": track.similarity, "match_score": track.similarity,
                                 "imageFace": paths["face_passport_path"], "imageFrame": paths["frame_path"],
-                                "metadata": {**paths, "decision": "CONFIRMED", **track.human_view_metadata()}, "alarm": False,
+                                "metadata": {**paths, "decision": "CONFIRMED", "trackId": str(tid), **track.human_view_metadata()}, "alarm": False,
                             }
                             generated_events.append(event_dict)
                             self._post_event_async(event_dict)
@@ -1126,13 +1207,14 @@ class GateObjectClassifierPipeline:
                         if not self.is_on_cooldown(cd_key, COOLDOWN_UNKNOWN_SEC):
                             event_type = f"PERSON_UNKNOWN_{self.direction}"
                             paths = self._save_person_capture_bundle(track, ts_ms, frame, best_cand, "UNKNOWN")
+                            track.similarity = float((best_cand.result or {}).get("similarity") or 0.0)
                             event_dict = {
                                 "cameraId": self.camera_id, "camera_id": self.camera_id, "direction": self.direction,
                                 "eventType": event_type, "event_type": event_type, "timestamp": now_iso,
                                 "name": "Unknown Person", "department": "Unregistered Visitor",
-                                "matchScore": float((best_cand.result or {}).get("similarity") or 0.0),
+                                "matchScore": track.similarity,
                                 "imageFace": paths["face_passport_path"], "imageFrame": paths["frame_path"],
-                                "metadata": {**paths, "decision": "UNKNOWN", **track.human_view_metadata()}, "alarm": True,
+                                "metadata": {**paths, "decision": "UNKNOWN", "trackId": str(tid), **track.human_view_metadata()}, "alarm": True,
                             }
                             generated_events.append(event_dict)
                             self._post_unknown_review_async(
@@ -1162,7 +1244,6 @@ class GateObjectClassifierPipeline:
                 vehicle_crop = frame[y1:y2, x1:x2]
                 if is_in_gate and (time.time() - track.first_seen) >= 0.3:
                     event_type = f"VEHICLE_{self.direction}"
-                    ts_ms = int(time.time() * 1000)
 
                     # Extract framed vehicle crop for clean card view
                     v_pad_x = int((x2 - x1) * 0.12)
@@ -1172,12 +1253,18 @@ class GateObjectClassifierPipeline:
                     vx1 = max(0, x1 - v_pad_x)
                     vx2 = min(w, x2 + v_pad_x)
                     vehicle_framed = frame[vy1:vy2, vx1:vx2]
+                    if vehicle_framed.size > 0:
+                        quality = score_vehicle_capture(vehicle_framed)
+                        if quality > track.best_vehicle_quality:
+                            track.best_vehicle_crop = vehicle_framed.copy()
+                            track.best_vehicle_quality = quality
 
                     if plate_pipeline_fn is not None and vehicle_crop.size > 0 and self.plate_voter.should_process(tid):
                         try:
+                            track.vehicle_observation_frames[self.frame_count] = vehicle_framed.copy()
+                            while len(track.vehicle_observation_frames) > plate_config.PLATE_VOTE_WINDOW:
+                                track.vehicle_observation_frames.popitem(last=False)
                             try:
-                                # OCR keeps its existing vehicle crop. The already padded
-                                # evidence crop is used only to save the complete plate.
                                 plate_observation = plate_pipeline_fn(
                                     vehicle_crop,
                                     track_id=tid,
@@ -1189,17 +1276,23 @@ class GateObjectClassifierPipeline:
                                 except TypeError:
                                     plate_observation = plate_pipeline_fn(vehicle_crop)
                             if isinstance(plate_observation, dict):
+                                plate_observation["_frame_token"] = self.frame_count
                                 self.plate_voter.add(tid, plate_observation)
                         except Exception as p_err:
                             logger.warning(f"Plate OCR notice: {p_err}")
                     plate_res = self.plate_voter.get_final(tid)
 
                     new_plate_found = False
+                    evidence_frame_token = None
+                    event_vehicle_crop = (
+                        track.best_vehicle_crop
+                        if track.best_vehicle_crop is not None
+                        else vehicle_framed
+                    )
                     if plate_res:
                         p_txt = str(plate_res.get("plate_text") or "").strip().upper()
                         p_status = str(plate_res.get("status") or "not_found")
-                        # Exclude camera brand watermarks
-                        if p_txt in {"CPIPCAM", "IPCAM", "CPPLUS", "CAMERA", "CCTV", "HDIPCAM", "TN69AB1234"}:
+                        if p_txt in {"CPIPCAM", "IPCAM", "CPPLUS", "CAMERA", "CCTV", "HDIPCAM"}:
                             p_txt = ""
                             p_status = "not_found"
                         if (track.plate_text, track.plate_status) != (p_txt or None, p_status):
@@ -1209,23 +1302,28 @@ class GateObjectClassifierPipeline:
                             track.plate_confidence = float(plate_res.get("confidence") or 0.0)
                             new_plate_found = True
 
-                        crop_relative = plate_res.get("plate_crop_path")
+                        evidence_frame_token = plate_res.get("_frame_token")
+                        if evidence_frame_token is not None:
+                            matching_vehicle_crop = track.vehicle_observation_frames.get(int(evidence_frame_token))
+                            if matching_vehicle_crop is not None:
+                                event_vehicle_crop = matching_vehicle_crop
+
+                        plate_crop = plate_res.get("_plate_crop")
                         crop_score = float(plate_res.get("_sharpness") or 0.0)
-                        if crop_relative and crop_relative != track.last_plate_crop_source and crop_score > track.last_plate_crop_score:
+                        if isinstance(plate_crop, np.ndarray) and plate_crop.size > 0 and (
+                            not track.last_saved_plate_fname
+                            or new_plate_found
+                            or crop_score > track.last_plate_crop_score
+                        ):
                             try:
-                                source_path = Path(crop_relative)
-                                if not source_path.is_absolute():
-                                    source_path = DATA_DIR.parent / source_path
-                                if source_path.is_file():
-                                    plate_fname = f"plate_{self.camera_id}_track{tid}_{ts_ms}.jpg"
-                                    destination = VEHICLE_DIR / plate_fname
-                                    destination.parent.mkdir(parents=True, exist_ok=True)
-                                    shutil.copyfile(source_path, destination)
+                                plate_fname = f"plate_{self.camera_id}_track{track.capture_id}.jpg"
+                                destination = VEHICLE_DIR / plate_fname
+                                if self._save_jpeg(plate_crop, destination):
                                     track.last_saved_plate_fname = plate_fname
-                                    track.last_plate_crop_source = crop_relative
+                                    track.last_plate_crop_source = str(evidence_frame_token) if evidence_frame_token is not None else None
                                     track.last_plate_crop_score = crop_score
                                     new_plate_found = True
-                            except OSError as crop_err:
+                            except (OSError, ValueError) as crop_err:
                                 logger.debug("Could not publish plate crop for %s track %s: %s", self.camera_id, tid, crop_err)
 
                         if plate_config.PLATE_DEBUG_DRAW and plate_res.get("_plate_bbox"):
@@ -1238,9 +1336,11 @@ class GateObjectClassifierPipeline:
                         cd_key = f"VEH_{plate_id}_{self.direction}"
 
                         if not self.is_on_cooldown(cd_key, COOLDOWN_PLATE_SEC):
-                            frame_fname = f"snap_veh_{self.camera_id}_{ts_ms}.jpg"
-                            # Save framed vehicle crop so vehicle is prominently captured and displayed
-                            self._save_jpeg(vehicle_framed if vehicle_framed.size > 0 else frame, SNAPSHOTS_DIR / frame_fname)
+                            frame_ref, vehicle_ref = self._save_vehicle_event_media(
+                                track,
+                                event_vehicle_crop,
+                                frame,
+                            )
 
                             event_dict = {
                                 "trackId": tid,
@@ -1259,20 +1359,28 @@ class GateObjectClassifierPipeline:
                                 "rawPlateText": track.raw_plate_text,
                                 "raw_plate_text": track.raw_plate_text,
                                 "department": f"{track.sub_label.title()} Vehicle",
+                                "vehicleImagePath": vehicle_ref,
                                 "imagePlate": getattr(track, 'last_saved_plate_fname', None),
                                 "image_plate_url": f"/vehicle-images/{track.last_saved_plate_fname}" if getattr(track, 'last_saved_plate_fname', None) else None,
-                                "imageFrame": frame_fname,
-                                "image_frame_url": f"/snapshot-images/{frame_fname}",
-                                "metadata": track.vehicle_view_metadata(),
+                                "imageFrame": frame_ref,
+                                "image_frame_url": f"/snapshot-images/{frame_ref}" if frame_ref else None,
+                                "metadata": {
+                                    **track.vehicle_view_metadata(),
+                                    "vehicleCaptureId": track.capture_id,
+                                    "plateEvidenceFrame": evidence_frame_token,
+                                    "plateCropSharpness": track.last_plate_crop_score,
+                                },
                                 "alarm": False,
                             }
                             generated_events.append(event_dict)
                             self._post_event_async(event_dict)
                             track.event_triggered = True
                     elif new_plate_found:
-                        # Plate was newly resolved on subsequent clearer frame -> post updated event!
-                        frame_fname = f"snap_veh_{self.camera_id}_{ts_ms}.jpg"
-                        self._save_jpeg(vehicle_framed if vehicle_framed.size > 0 else frame, SNAPSHOTS_DIR / frame_fname)
+                        frame_ref, vehicle_ref = self._save_vehicle_event_media(
+                            track,
+                            event_vehicle_crop,
+                            frame,
+                        )
                         event_dict = {
                             "trackId": tid,
                             "vehicleType": track.sub_label.title() if track.sub_label in {"car", "motorcycle", "bus", "truck"} else "Unknown",
@@ -1290,11 +1398,17 @@ class GateObjectClassifierPipeline:
                             "rawPlateText": track.raw_plate_text,
                             "raw_plate_text": track.raw_plate_text,
                             "department": f"{track.sub_label.title()} Vehicle",
+                            "vehicleImagePath": vehicle_ref,
                             "imagePlate": getattr(track, 'last_saved_plate_fname', None),
                             "image_plate_url": f"/vehicle-images/{track.last_saved_plate_fname}" if getattr(track, 'last_saved_plate_fname', None) else None,
-                            "imageFrame": frame_fname,
-                            "image_frame_url": f"/snapshot-images/{frame_fname}",
-                            "metadata": track.vehicle_view_metadata(),
+                            "imageFrame": frame_ref,
+                            "image_frame_url": f"/snapshot-images/{frame_ref}" if frame_ref else None,
+                            "metadata": {
+                                **track.vehicle_view_metadata(),
+                                "vehicleCaptureId": track.capture_id,
+                                "plateEvidenceFrame": evidence_frame_token,
+                                "plateCropSharpness": track.last_plate_crop_score,
+                            },
                             "alarm": False,
                         }
                         generated_events.append(event_dict)
@@ -1343,8 +1457,21 @@ class GateObjectClassifierPipeline:
         for tid, track in self.tracks.items():
             if track.stable_class == "PERSON":
                 display_name = track.employee_name if track.face_state == "CONFIRMED" else ("Unknown" if track.face_state == "UNKNOWN" else "Person")
+                if track.face_state == "CONFIRMED":
+                    recognition_status = "REGISTERED"
+                elif track.face_state == "UNKNOWN":
+                    recognition_status = "UNKNOWN_PERSON"
+                elif track.face_state == "RECOGNITION_ERROR":
+                    recognition_status = "RECOGNITION_ERROR"
+                elif track.face_state in {"FACE_TOO_SMALL", "FACE_QUALITY_LOW", "FACE_TURNED_AWAY"}:
+                    recognition_status = "LOW_FACE_QUALITY"
+                elif track.face_state in {"FACE_NOT_VISIBLE", "NO_FACE_CAPTURED", "PERSON_TRACKED", "EXIT_TRACKING"}:
+                    recognition_status = "FACE_NOT_VISIBLE"
+                else:
+                    recognition_status = "RECOGNITION_PENDING"
             else:
                 display_name = track.plate_text or (track.species.title() if track.stable_class == "ANIMAL" else "")
+                recognition_status = None
             tracks_hud_info.append({
                 "track_id": tid,
                 "bbox": track.bbox,
@@ -1354,10 +1481,12 @@ class GateObjectClassifierPipeline:
                 "event_type": track.person_event_type,
                 "missed": track.missed_frames,
                 "face_state": track.face_state if track.stable_class == "PERSON" else None,
+                "recognition_status": recognition_status,
                 "face_reason": track.face_reason if track.stable_class == "PERSON" else None,
                 "face_bbox": track.current_face_bbox if track.stable_class == "PERSON" else None,
                 "face_landmarks": track.current_face_landmarks.tolist() if track.stable_class == "PERSON" and track.current_face_landmarks is not None else None,
                 "best_face_score": round(float(track.best_face_score), 4) if track.stable_class == "PERSON" else None,
+                "similarity": track.similarity if track.stable_class == "PERSON" else None,
                 "human_orientation": track.human_orientation if track.stable_class == "PERSON" else None,
                 "human_orientation_confidence": track.human_orientation_confidence if track.stable_class == "PERSON" else None,
                 "vehicle_angle": track.vehicle_angle if track.stable_class == "VEHICLE" else None,
@@ -1367,11 +1496,37 @@ class GateObjectClassifierPipeline:
         self._write_track_debug_snapshot()
         return tracks_hud_info, generated_events
 
-    def _save_jpeg(self, img: np.ndarray, path: Path):
+    def _save_vehicle_event_media(
+        self,
+        track: ObjectTrack,
+        vehicle_crop: Optional[np.ndarray],
+        original_frame: np.ndarray,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        original_name = track.original_frame_fname or f"frame_{self.camera_id}_track{track.capture_id}.jpg"
+        original_path = SNAPSHOTS_DIR / original_name
+        if not original_path.is_file():
+            self._save_jpeg(original_frame, original_path)
+        track.original_frame_fname = original_name if original_path.is_file() else None
+
+        vehicle_name = track.vehicle_snapshot_fname or f"vehicle_{self.camera_id}_track{track.capture_id}.jpg"
+        vehicle_path = SNAPSHOTS_DIR / vehicle_name
+        vehicle_saved = (
+            vehicle_crop is not None
+            and vehicle_crop.size > 0
+            and self._save_jpeg(vehicle_crop, vehicle_path)
+        )
+        track.vehicle_snapshot_fname = vehicle_name if vehicle_saved or vehicle_path.is_file() else None
+        return track.original_frame_fname, track.vehicle_snapshot_fname
+
+    def _save_jpeg(self, img: np.ndarray, path: Path) -> bool:
         try:
-            cv2.imwrite(str(path), img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            if img is None or img.size == 0:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return bool(cv2.imwrite(str(path), img, [int(cv2.IMWRITE_JPEG_QUALITY), 95]))
         except Exception as e:
             logger.warning(f"Could not save JPEG {path}: {e}")
+            return False
 
     def _save_passport_crop(self, crop: np.ndarray, path: Path):
         try:

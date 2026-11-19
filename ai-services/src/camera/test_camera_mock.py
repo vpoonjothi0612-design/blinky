@@ -45,8 +45,8 @@ class TestCameraConfigAndUrlSafety(unittest.TestCase):
             name="Test Cam",
             ip="192.168.9.207",
             port=554,
-            username="admin",
-            password="Champ@3841",
+            username="operator",
+            password="mock@password",
             channel=1,
             subtype=1,
             scheme="rtsp",
@@ -55,8 +55,8 @@ class TestCameraConfigAndUrlSafety(unittest.TestCase):
 
         raw_url = cfg.get_rtsp_url(sanitize=False, encode_credentials=True)
         # '@' in password must be encoded to '%40' so parser does not confuse it with host delimiter
-        self.assertIn("Champ%403841", raw_url)
-        self.assertEqual(raw_url, "rtsp://admin:Champ%403841@192.168.9.207:554/cam/realmonitor?channel=1&subtype=1")
+        self.assertIn("mock%40password", raw_url)
+        self.assertEqual(raw_url, "rtsp://operator:mock%40password@192.168.9.207:554/cam/realmonitor?channel=1&subtype=1")
 
     def test_sanitized_url_masks_password(self):
         """Verifies passwords are never exposed in sanitized URLs."""
@@ -65,31 +65,31 @@ class TestCameraConfigAndUrlSafety(unittest.TestCase):
             name="Test Cam",
             ip="192.168.9.207",
             port=554,
-            username="admin",
-            password="Champ@3841",
+            username="operator",
+            password="mock@password",
         )
 
         sanitized = cfg.sanitized_url
-        self.assertNotIn("Champ@3841", sanitized)
-        self.assertNotIn("Champ%403841", sanitized)
-        self.assertIn("admin:***@192.168.9.207", sanitized)
+        self.assertNotIn("mock@password", sanitized)
+        self.assertNotIn("mock%40password", sanitized)
+        self.assertIn("operator:***@192.168.9.207", sanitized)
 
     def test_sanitize_rtsp_url_utility(self):
         """Checks generic URL string sanitization."""
-        url = "rtsp://admin:SecretPass123@192.168.9.208:554/cam/realmonitor?channel=1&subtype=1"
+        url = "rtsp://camera-user:example-password@192.168.9.208:554/cam/realmonitor?channel=1&subtype=1"
         safe = sanitize_rtsp_url(url)
         self.assertEqual(
             safe,
-            "rtsp://admin:***@192.168.9.208:554/cam/realmonitor?channel=1&subtype=1",
+            "rtsp://camera-user:***@192.168.9.208:554/cam/realmonitor?channel=1&subtype=1",
         )
-        self.assertNotIn("SecretPass123", safe)
+        self.assertNotIn("example-password", safe)
 
     def test_env_loader_mapping(self):
         """Verifies loading CameraConfig from environment variables."""
         with patch.dict(os.environ, {
             "CAMERA_1_IP": "192.168.9.207",
-            "CAMERA_1_USERNAME": "admin",
-            "CAMERA_1_PASSWORD": "Champ@3841",
+            "CAMERA_1_USERNAME": "operator",
+            "CAMERA_1_PASSWORD": "mock@password",
             "CAMERA_1_RTSP_PORT": "554",
             "CAMERA_1_STREAM_SUBTYPE": "1",
             "CAMERA_1_CHANNEL": "1",
@@ -98,8 +98,8 @@ class TestCameraConfigAndUrlSafety(unittest.TestCase):
             self.assertIsNotNone(cfg)
             self.assertEqual(cfg.camera_id, "CAM-01")
             self.assertEqual(cfg.ip, "192.168.9.207")
-            self.assertEqual(cfg.username, "admin")
-            self.assertEqual(cfg.password, "Champ@3841")
+            self.assertEqual(cfg.username, "operator")
+            self.assertEqual(cfg.password, "mock@password")
             self.assertEqual(cfg.port, 554)
             self.assertEqual(cfg.subtype, 1)
 
@@ -140,6 +140,46 @@ class TestCameraWorkerMockedLifecycle(unittest.TestCase):
         finally:
             worker.stop()
             self.assertEqual(worker.state, ConnectionState.STOPPED)
+
+    def test_connection_probe_reports_decoded_frame_metrics(self):
+        cfg = CameraConfig(camera_id="CAM-01", name="Mock Cam", ip="192.168.9.207", password="mock-password")
+        worker = CameraWorker(config=cfg)
+        capture = MagicMock()
+        capture.read.return_value = (True, self.mock_frame.copy())
+        capture.get.return_value = 25.0
+
+        with patch.object(worker, "_open_capture", return_value=capture):
+            result = worker.test_connection(sample_duration_sec=0)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["state"], "CONNECTED")
+        self.assertEqual(result["decode_status"], "PASS")
+        self.assertEqual(result["resolution"], "640x480")
+        self.assertEqual(result["frames_decoded"], 1)
+        self.assertEqual(result["reported_fps"], 25.0)
+        self.assertNotIn("mock-password", str(result))
+        self.assertNotIn("password", result)
+        capture.release.assert_called_once()
+
+    def test_connection_probe_fails_when_stream_does_not_decode(self):
+        cfg = CameraConfig(camera_id="CAM-01", name="Mock Cam", ip="192.168.9.207")
+        worker = CameraWorker(config=cfg)
+        capture = MagicMock()
+        capture.read.return_value = (False, None)
+
+        with patch.object(worker, "_open_capture", return_value=capture):
+            result = worker.test_connection(sample_duration_sec=0)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["state"], "ERROR")
+        self.assertEqual(result["decode_status"], "FAIL")
+        capture.release.assert_called_once()
+
+    def test_camera_config_does_not_default_to_a_login(self):
+        cfg = CameraConfig(camera_id="CAM-01", name="Mock Cam", ip="192.168.9.207")
+
+        self.assertEqual(cfg.username, "")
+        self.assertNotIn("@", cfg.get_rtsp_url())
 
     @patch("camera.camera_worker.cv2.VideoCapture")
     def test_reconnection_on_read_failure(self, mock_cv2_capture):

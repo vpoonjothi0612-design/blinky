@@ -1,10 +1,11 @@
-import { Op } from "sequelize";
+import { Op, col, fn, where as sequelizeWhere } from "sequelize";
 import fs from "fs/promises";
 import path from "path";
 import SurveillanceEvent from "./event.model.js";
 import Employee from "../employee/employee.model.js";
 import FaceEnrollment from "../face-enrollment/face-enrollment.model.js";
 import Camera from "../camera/camera.model.js";
+import Vehicle from "../vehicle/vehicle.model.js";
 import { broadcastLiveEvent, createAttendance } from "../attendance/attendance.service.js";
 import { MEDIA_ROOT, mediaUrl, normalizeMediaPath, resolveMediaPath } from "../media/media.service.js";
 import { mapViewMetadata } from "./view-metadata.js";
@@ -16,6 +17,58 @@ const OCR_TO_DIGIT = { O: "0", Q: "0", D: "0", I: "1", L: "1", Z: "2", S: "5", B
 const OCR_TO_LETTER = { "0": "O", "1": "I", "2": "Z", "5": "S", "8": "B" };
 const recentVehicleTracks = new Map();
 const eventCountCache = new Map();
+const normalizeRegistryPlate = (plate) => String(plate || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const formatRegisteredVehicle = (vehicle) => {
+  const raw = vehicle.toJSON ? vehicle.toJSON() : vehicle;
+  const employee = raw.employee;
+  return {
+    registration_number: raw.registrationNumber,
+    type: raw.type,
+    make: raw.make,
+    model: raw.model,
+    color: raw.color,
+    owner: employee
+      ? {
+          employee_code: employee.employeeCode,
+          name: `${employee.firstName || ""} ${employee.lastName || ""}`.trim(),
+        }
+      : null,
+  };
+};
+
+const findRegisteredVehiclesByPlates = async (plateTexts = []) => {
+  const normalizedPlates = [...new Set(plateTexts.map(normalizeRegistryPlate).filter(Boolean))];
+  if (!normalizedPlates.length) return new Map();
+
+  const records = await Vehicle.findAll({
+    where: {
+      status: "ACTIVE",
+      [Op.and]: sequelizeWhere(
+        fn("regexp_replace", fn("upper", col("registration_number")), "[^A-Z0-9]", "", "g"),
+        { [Op.in]: normalizedPlates },
+      ),
+    },
+    attributes: ["registrationNumber", "type", "make", "model", "color"],
+    include: [{
+      model: Employee,
+      as: "employee",
+      attributes: ["employeeCode", "firstName", "lastName"],
+      required: false,
+    }],
+  });
+
+  const matches = new Map();
+  for (const vehicle of records) {
+    const key = normalizeRegistryPlate(vehicle.registrationNumber);
+    if (matches.has(key)) {
+      matches.set(key, null);
+    } else {
+      matches.set(key, formatRegisteredVehicle(vehicle));
+    }
+  }
+  return matches;
+};
 
 export const canonicalActiveEventCameraIds = (cameraNames = []) => Array.from(new Set(
   cameraNames
@@ -118,7 +171,12 @@ export const recordSurveillanceEvent = async (data) => {
     matchScore: data.matchScore !== undefined ? Number(data.matchScore) : (data.similarity !== undefined ? Number(data.similarity) : null),
     plateText,
     rawPlateText: data.rawPlateText || null,
-    plateStatus: resolvePlateStatus(plateText, data.plateConfidence, incomingPlateStatus),
+    plateStatus: resolvePlateStatus(
+      plateText,
+      data.plateConfidence,
+      incomingPlateStatus,
+      data.rawPlateText || data.raw_plate_text,
+    ),
     plateConfidence: data.plateConfidence == null ? null : Number(data.plateConfidence),
     vehicleType: data.vehicleType || data.vehicle_type || null,
     gateName: data.gateName || data.cameraName || null,
@@ -178,7 +236,13 @@ export const recordSurveillanceEvent = async (data) => {
   }
 
   // Format response for real-time SSE broadcast
-  const formattedEvent = formatEventResponse(created);
+  const registeredVehicles = eventPayload.plateStatus === "recognized"
+    ? await findRegisteredVehiclesByPlates([eventPayload.plateText])
+    : new Map();
+  const formattedEvent = formatEventResponse(
+    created,
+    registeredVehicles.get(normalizeRegistryPlate(eventPayload.plateText)) || null,
+  );
 
   // Broadcast to all active frontend SSE streams
   broadcastLiveEvent({
@@ -283,12 +347,31 @@ export const getSurveillanceEvents = async (query = {}) => {
     ].filter(() => !["VEHICLE", "VEHICLES"].includes(String(query.type || "").toUpperCase())),
   });
 
-  return { rows: events.map(formatEventResponse), page, limit, total: await SurveillanceEvent.count({ where: baseWhere }), counts: { all: allCount, entry: entryCount, exit: exitCount, recognized: plateCount, notRecognized: notReadCount } };
+  const registeredVehicles = await findRegisteredVehiclesByPlates(
+    events.filter((event) => event.plateStatus === "recognized").map((event) => event.plateText),
+  );
+  return {
+    rows: events.map((event) => formatEventResponse(
+      event,
+      registeredVehicles.get(normalizeRegistryPlate(event.plateText)) || null,
+    )),
+    page,
+    limit,
+    total: await SurveillanceEvent.count({ where: baseWhere }),
+    counts: { all: allCount, entry: entryCount, exit: exitCount, recognized: plateCount, notRecognized: notReadCount },
+  };
 };
 
 export const getSurveillanceEventById = async (id) => {
   const event = await SurveillanceEvent.findByPk(id);
-  return event ? formatEventResponse(event) : null;
+  if (!event) return null;
+  const registeredVehicles = event.plateStatus === "recognized"
+    ? await findRegisteredVehiclesByPlates([event.plateText])
+    : new Map();
+  return formatEventResponse(
+    event,
+    registeredVehicles.get(normalizeRegistryPlate(event.plateText)) || null,
+  );
 };
 
 export const correctSurveillanceEventPlate = async (id, submittedPlate) => {
@@ -343,10 +426,14 @@ export const correctSurveillanceEventPlate = async (id, submittedPlate) => {
       plateCorrection: { correctedPlate: plateText, crop: relativeCropPath, correctedAt },
     },
   });
-  return formatEventResponse(event);
+  const registeredVehicles = await findRegisteredVehiclesByPlates([plateText]);
+  return formatEventResponse(
+    event,
+    registeredVehicles.get(normalizeRegistryPlate(plateText)) || null,
+  );
 };
 
-export const formatEventResponse = (event) => {
+export const formatEventResponse = (event, registeredVehicle = null) => {
   const raw = event.toJSON ? event.toJSON() : event;
 
   // Resolve image URLs with cache-busting timestamp support
@@ -394,6 +481,7 @@ export const formatEventResponse = (event) => {
     all_photos: raw.metadata?.frames || [],
     vehicle_image_url: raw.vehicleImagePath ? resolveImageUrl(raw.vehicleImagePath, "snapshot-images") : imageFrameUrl,
     plate_image_url: raw.plateImagePath ? resolveImageUrl(raw.plateImagePath, "vehicle-images") : imagePlateUrl,
+    registered_vehicle: raw.plateStatus === "recognized" ? registeredVehicle : null,
     species: raw.species,
     image_face_url: imageFaceUrl,
     image_plate_url: imagePlateUrl,
@@ -435,18 +523,29 @@ const normalizeValidPlate = (text) => {
   return null;
 };
 
-const normalizePlateStatus = (status) => ({
+export const normalizePlateStatus = (status) => ({
   ok: "recognized",
   recognized: "recognized",
+  pending_verification: "pending_verification",
   low_confidence: "low_confidence",
   invalid_format: "invalid_format",
   not_found: "not_recognized",
   not_recognized: "not_recognized",
+  plate_not_detected: "not_recognized",
+  plate_not_recognized: "not_recognized",
 })[String(status || "").toLowerCase()] || null;
 
-const resolvePlateStatus = (text, confidence, incomingStatus = null) => {
+export const resolvePlateStatus = (text, confidence, incomingStatus = null, rawText = null) => {
+  if (incomingStatus === "recognized") {
+    if (!text) return "not_recognized";
+    if (!normalizeValidPlate(text)) return "invalid_format";
+    const rawCandidate = String(rawText || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const normalizedCandidate = String(text).toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (rawCandidate && rawCandidate !== normalizedCandidate) return "pending_verification";
+    return Number(confidence ?? 0) >= 0.85 ? "recognized" : "low_confidence";
+  }
   if (incomingStatus) return incomingStatus;
-  if (!text || Number(confidence ?? 0) < 0.6) return "not_recognized";
+  if (!text) return "not_recognized";
   if (!normalizeValidPlate(text)) return "invalid_format";
   return Number(confidence ?? 0) >= 0.85 ? "recognized" : "low_confidence";
 };

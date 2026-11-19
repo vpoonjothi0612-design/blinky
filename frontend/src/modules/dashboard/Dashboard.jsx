@@ -250,44 +250,49 @@ const Dashboard = () => {
   const systemStatusInfo = useMemo(() => {
     const isAiOnline = Boolean(systemHealth.aiServiceOnline);
     const isCamOnline = cameraStats.online > 0;
-    const isCamAllOnline = isCamOnline && cameraStats.offline === 0;
+    const hasCameras = cameraStats.total > 0;
+    const isCamAllOnline = hasCameras && isCamOnline && cameraStats.offline === 0;
+
+    if (!hasCameras) {
+      return {
+        dotClass: 'dot-amber',
+        pingClass: 'ping-amber',
+        titleClass: 'text-amber',
+        title: 'NO CAMERAS CONFIGURED',
+        sub: isAiOnline
+          ? 'AI API responds; configure a camera and run its RTSP decode test.'
+          : 'No camera configuration or AI API response is available.',
+      };
+    }
 
     if (isAiOnline && isCamAllOnline) {
       return {
         dotClass: '',
         pingClass: '',
         titleClass: '',
-        title: 'SYSTEM OPERATIONAL',
-        sub: 'All cameras and AI services running',
+        title: 'SERVICES RESPONDING',
+        sub: 'AI API responds; camera networks reachable. RTSP decode is unverified.',
       };
     }
 
-    if (!isCamOnline && !isAiOnline) {
-      return {
-        dotClass: 'dot-red',
-        pingClass: 'ping-red',
-        titleClass: 'text-red',
-        title: 'CAMERAS OFFLINE',
-        sub: 'Hardware is disconnected',
-      };
-    }
-
-    if (!isCamOnline) {
+    if (isAiOnline) {
       return {
         dotClass: 'dot-amber',
         pingClass: 'ping-amber',
         titleClass: 'text-amber',
-        title: 'CAMERAS DISCONNECTED',
-        sub: `${cameraStats.online} of ${cameraStats.total} cameras connected`,
+        title: isCamOnline ? 'PARTIAL CAMERA NETWORK AVAILABILITY' : 'CAMERA NETWORK UNAVAILABLE',
+        sub: `${cameraStats.online} of ${cameraStats.total} camera network checks passed; RTSP decode remains unverified.`,
       };
     }
 
     return {
-      dotClass: 'dot-amber',
-      pingClass: 'ping-amber',
-      titleClass: 'text-amber',
-      title: 'AI SERVICE OFFLINE',
-      sub: 'Camera streams active, AI engine offline',
+      dotClass: isCamOnline ? 'dot-amber' : 'dot-red',
+      pingClass: isCamOnline ? 'ping-amber' : 'ping-red',
+      titleClass: isCamOnline ? 'text-amber' : 'text-red',
+      title: 'AI SERVICE UNAVAILABLE',
+      sub: isCamOnline
+        ? 'Camera network reachable; AI API did not respond.'
+        : 'No camera network checks passed; AI API did not respond.',
     };
   }, [systemHealth.aiServiceOnline, cameraStats.online, cameraStats.offline, cameraStats.total]);
 
@@ -484,7 +489,7 @@ const Dashboard = () => {
               <div className="dash-kpi-footer">
                 <span className={`dash-kpi-cam-status ${cameraStats.online > 0 ? '' : 'offline'}`}>
                   <span className={`dash-cam-dot ${cameraStats.online > 0 ? '' : 'dot-offline'}`}></span>
-                  {cameraStats.total === 0 ? 'No cameras' : `${cameraStats.online} of ${cameraStats.total} online`}
+                  {cameraStats.total === 0 ? 'No cameras' : `${cameraStats.online} of ${cameraStats.total} reachable`}
                 </span>
                 <span className="dash-card-link" style={{ fontSize: '11.5px' }}>Feeds &rarr;</span>
               </div>
@@ -1014,7 +1019,7 @@ const Dashboard = () => {
                         </div>
                         <div className={`dash-cam-item-status ${isOnline ? 'online' : 'offline'}`}>
                           <span className="dash-status-dot-sm"></span>
-                          <span>{isOnline ? 'Online' : 'Offline'}</span>
+                          <span>{isOnline ? 'Reachable' : 'Unreachable'}</span>
                         </div>
                       </div>
                     );

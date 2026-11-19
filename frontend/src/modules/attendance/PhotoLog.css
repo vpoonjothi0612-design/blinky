@@ -126,7 +126,8 @@
 }
 
 .photo-log-card input[type='search']:focus,
-.photo-log-table-toolbar select:focus {
+.photo-log-table-toolbar select:focus,
+.photo-log-table-toolbar input[type='month']:focus {
   border-color: #34b883;
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
 }
@@ -434,7 +435,8 @@
   min-width: 175px;
 }
 
-.photo-log-table-toolbar select {
+.photo-log-table-toolbar select,
+.photo-log-table-toolbar input[type='month'] {
   background: var(--surface, #fff);
   border: 1px solid var(--border-color, #cbd5e1);
   border-radius: 9px;

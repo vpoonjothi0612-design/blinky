@@ -44,3 +44,22 @@ test('crossing output carries normalized view metadata', () => {
   assert.equal(crossing.human_orientation_confidence, 0.81);
   assert.deepEqual(crossing.human_angle_images, { LEFT: 'captures/left.jpg' });
 });
+
+test('view metadata preserves supported profile and diagonal face orientations', () => {
+  const metadata = mapViewMetadata({
+    humanOrientation: 'right_profile',
+    humanOrientationConfidence: 0.77,
+    humanAngleImages: {
+      FRONT_LEFT: 'captures/front-left.jpg',
+      RIGHT_PROFILE: 'captures/right-profile.jpg',
+      BACK: 'captures/back.jpg',
+    },
+  });
+
+  assert.equal(metadata.human_orientation, 'RIGHT_PROFILE');
+  assert.equal(metadata.human_orientation_confidence, 0.77);
+  assert.deepEqual(metadata.human_angle_images, {
+    FRONT_LEFT: 'captures/front-left.jpg',
+    RIGHT_PROFILE: 'captures/right-profile.jpg',
+  });
+});

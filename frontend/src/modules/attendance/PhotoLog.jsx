@@ -6,6 +6,7 @@ import api, { getBackendBaseUrl } from '../../services/api';
 import { mediaUrlForLegacyPath } from '../../services/media.service';
 import { getAttendanceByEmployee, searchEmployeeByPhoto } from './attendance.service';
 import { getEmployees } from '../employee/employee.service';
+import useAuth from '../../hooks/useAuth';
 import './PhotoLog.css';
 
 const PAGE_SIZE = 100;
@@ -25,6 +26,40 @@ const formatTimestamp = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
 };
+
+const formatDate = (value) => {
+  if (!value) return 'N/A';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleDateString();
+};
+
+const formatTime = (value) => {
+  if (!value) return 'N/A';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleTimeString();
+};
+
+const formatSimilarity = (value) => {
+  if (value === null || value === undefined || value === '') return 'N/A';
+  const similarity = Number(value);
+  return Number.isFinite(similarity) ? `${(similarity * 100).toFixed(1)}%` : 'N/A';
+};
+
+const getMonthDateRange = (monthValue) => {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(monthValue);
+  if (!match) return {};
+
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const startDate = new Date(year, month, 1);
+  const endDate = new Date(year, month + 1, 1);
+  return { startDate: startDate.toISOString(), endDate: endDate.toISOString() };
+};
+
+const getAttendanceFilters = (eventFilter, monthFilter) => ({
+  ...(eventFilter ? { eventType: eventFilter } : {}),
+  ...getMonthDateRange(monthFilter),
+});
 
 const getPhotoSource = (record) => record?.capturedImage || null;
 
@@ -144,6 +179,7 @@ const PhotoLogImage = ({ source, alt, className }) => {
 };
 
 const PhotoLog = () => {
+  const { user } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [employeesLoading, setEmployeesLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -153,6 +189,7 @@ const PhotoLog = () => {
   const [recordCount, setRecordCount] = useState(0);
   const [page, setPage] = useState(1);
   const [eventFilter, setEventFilter] = useState('');
+  const [monthFilter, setMonthFilter] = useState('');
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
@@ -204,7 +241,7 @@ const PhotoLog = () => {
     let active = true;
     setLoadingRecords(true);
     setError('');
-    const filters = eventFilter ? { eventType: eventFilter } : {};
+    const filters = getAttendanceFilters(eventFilter, monthFilter);
 
     getAttendanceByEmployee(selectedEmployee.id, page, PAGE_SIZE, filters)
       .then((response) => {
@@ -223,11 +260,12 @@ const PhotoLog = () => {
     return () => {
       active = false;
     };
-  }, [selectedEmployee?.id, page, eventFilter]);
+  }, [selectedEmployee?.id, page, eventFilter, monthFilter]);
 
   const matches = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery || selectedEmployee) return [];
+    const searchTokens = normalizedQuery.split(/[\s(),.;:_-]+/).filter(Boolean);
 
     return employees
       .filter((employee) => {
@@ -238,7 +276,7 @@ const PhotoLog = () => {
           employeeName(employee),
           employee.department,
         ].filter(Boolean).join(' ').toLowerCase();
-        return searchable.includes(normalizedQuery);
+        return searchTokens.every((token) => searchable.includes(token));
       })
       .slice(0, 10);
   }, [employees, query, selectedEmployee]);
@@ -252,6 +290,7 @@ const PhotoLog = () => {
     setShowMatches(false);
     setPage(1);
     setEventFilter('');
+    setMonthFilter('');
     setNotice('');
     setError('');
   };
@@ -311,7 +350,7 @@ const PhotoLog = () => {
     const allRecords = [];
     let exportPage = 1;
     let total = recordCount;
-    const filters = eventFilter ? { eventType: eventFilter } : {};
+    const filters = getAttendanceFilters(eventFilter, monthFilter);
 
     while (true) {
       const response = await getAttendanceByEmployee(selectedEmployee.id, exportPage, PAGE_SIZE, filters);
@@ -389,53 +428,140 @@ const PhotoLog = () => {
 
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(18);
-      doc.setTextColor(15, 23, 42);
-      doc.text('Employee Photo Log', 14, 17);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(71, 85, 105);
-      doc.text(
-        `${employeeName(selectedEmployee)} | ${selectedEmployee.employeeCode || 'No code'} | ${selectedEmployee.department || 'No department'}`,
-        14,
-        24
-      );
-      doc.text(`Generated ${new Date().toLocaleString()} | ${allRecords.length} attendance records`, 14, 30);
+      const companyName = user?.company || 'Enterprise Attendance';
+      const generatedAt = new Date().toLocaleString();
+      const employeeCode = selectedEmployee.employeeCode || 'No code';
+      const department = selectedEmployee.department || 'No department';
 
       autoTable(doc, {
-        startY: 36,
-        head: [['Photo', 'Photo type', 'Direction', 'Date and time', 'Camera', 'Status', 'Source', 'Similarity']],
+        startY: 65,
+        head: [['Image', 'Date', 'Time', 'Direction', 'Camera', 'Status', 'Similarity']],
         body: allRecords.map((record, index) => [
           photos[index] ? '' : 'No photo',
-          record.capturedImage ? 'Camera-detected face' : 'Camera image unavailable',
+          formatDate(record.timestamp),
+          formatTime(record.timestamp),
           record.eventType === 'IN' ? 'ENTRY' : record.eventType === 'OUT' ? 'EXIT' : record.eventType || 'N/A',
-          formatTimestamp(record.timestamp),
           record.camera?.name || record.cameraId || 'Not recorded',
           record.status || 'N/A',
-          record.source || 'N/A',
-          record.similarity ?? 'N/A',
+          formatSimilarity(record.similarity),
         ]),
         theme: 'grid',
-        margin: { left: 14, right: 14, bottom: 14 },
-        styles: { font: 'helvetica', fontSize: 8, cellPadding: 2.5, textColor: [30, 41, 59], minCellHeight: 19, valign: 'middle' },
-        headStyles: { fillColor: [15, 118, 94], textColor: [255, 255, 255], fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: [245, 249, 248] },
-        columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 30 }, 2: { cellWidth: 20 }, 3: { cellWidth: 39 }, 4: { cellWidth: 32 }, 5: { cellWidth: 22 }, 6: { cellWidth: 25 }, 7: { cellWidth: 22 } },
+        margin: { left: 14, right: 14, top: 32, bottom: 16 },
+        styles: {
+          font: 'helvetica',
+          fontSize: 8,
+          cellPadding: 2,
+          textColor: [51, 65, 85],
+          lineColor: [226, 232, 240],
+          lineWidth: 0.1,
+          minCellHeight: 19,
+          valign: 'middle',
+        },
+        headStyles: { fillColor: [15, 118, 94], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5, halign: 'center' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          0: { cellWidth: 26, halign: 'center' },
+          1: { cellWidth: 37, halign: 'center' },
+          2: { cellWidth: 37, halign: 'center' },
+          3: { cellWidth: 28, halign: 'center' },
+          4: { cellWidth: 62 },
+          5: { cellWidth: 40, halign: 'center' },
+          6: { cellWidth: 39, halign: 'center' },
+        },
         didDrawCell: (cell) => {
           if (cell.section !== 'body' || cell.column.index !== 0) return;
           const photo = photos[cell.row.index];
           if (!photo) return;
-          doc.addImage(photo.data, photo.format, cell.cell.x + 3, cell.cell.y + 2, 14, 14);
+          const imageSize = 14;
+          doc.addImage(
+            photo.data,
+            photo.format,
+            cell.cell.x + (cell.cell.width - imageSize) / 2,
+            cell.cell.y + (cell.cell.height - imageSize) / 2,
+            imageSize,
+            imageSize
+          );
+        },
+        didDrawPage: (data) => {
+          if (data.pageNumber === 1) {
+            doc.setFillColor(15, 118, 94);
+            doc.roundedRect(14, 10, pageWidth - 28, 13, 2, 2, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            while (doc.getTextWidth(companyName) > pageWidth - 100 && doc.getFontSize() > 7) {
+              doc.setFontSize(doc.getFontSize() - 0.5);
+            }
+            doc.text(companyName, 19, 18.5);
+            doc.setFontSize(8);
+            doc.text('ATTENDANCE REPORT', pageWidth - 19, 18.5, { align: 'right' });
+
+            doc.setTextColor(15, 23, 42);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(17);
+            doc.text('Employee Photo Log', 14, 33);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8.5);
+            doc.setTextColor(100, 116, 139);
+            doc.text('Attendance history with captured photos and match similarity', 14, 39);
+
+            const detailsY = 44;
+            const detailsHeight = 17;
+            const detailsWidth = pageWidth - 28;
+            const fieldWidth = detailsWidth / 5;
+            const reportDetails = [
+              ['EMPLOYEE', employeeName(selectedEmployee)],
+              ['EMPLOYEE CODE', employeeCode],
+              ['DEPARTMENT', department],
+              ['RECORDS', String(allRecords.length)],
+              ['GENERATED', generatedAt],
+            ];
+            doc.setFillColor(248, 250, 252);
+            doc.setDrawColor(226, 232, 240);
+            doc.roundedRect(14, detailsY, detailsWidth, detailsHeight, 2, 2, 'FD');
+            reportDetails.forEach(([label, value], index) => {
+              const fieldX = 14 + index * fieldWidth;
+              if (index > 0) doc.line(fieldX, detailsY + 3, fieldX, detailsY + detailsHeight - 3);
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(6.5);
+              doc.setTextColor(100, 116, 139);
+              doc.text(label, fieldX + 3, detailsY + 6);
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(8);
+              doc.setTextColor(30, 41, 59);
+              while (doc.getTextWidth(value) > fieldWidth - 6 && doc.getFontSize() > 6) {
+                doc.setFontSize(doc.getFontSize() - 0.5);
+              }
+              doc.text(value, fieldX + 3, detailsY + 12);
+            });
+          } else {
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(15, 118, 94);
+            doc.text(companyName, 14, 17, { maxWidth: pageWidth / 2 - 20 });
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.setTextColor(100, 116, 139);
+            doc.text(`Employee: ${employeeName(selectedEmployee)} | ${employeeCode}`, pageWidth - 14, 17, {
+              align: 'right',
+              maxWidth: pageWidth / 2 - 20,
+            });
+            doc.setDrawColor(226, 232, 240);
+            doc.line(14, 23, pageWidth - 14, 23);
+          }
         },
       });
 
       const pageCount = doc.internal.getNumberOfPages();
       for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
         doc.setPage(pageNumber);
+        const pageHeight = doc.internal.pageSize.getHeight();
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, pageHeight - 12, pageWidth - 14, pageHeight - 12);
         doc.setFontSize(8);
         doc.setTextColor(100, 116, 139);
-        doc.text(`Page ${pageNumber} of ${pageCount}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 6, { align: 'right' });
+        doc.text('Employee Photo Log', 14, pageHeight - 6);
+        doc.text(`Page ${pageNumber} of ${pageCount}`, pageWidth - 14, pageHeight - 6, { align: 'right' });
       }
 
       const safeCode = String(selectedEmployee.employeeCode || 'employee').replace(/[^a-z0-9_-]/gi, '_');
@@ -583,6 +709,17 @@ const PhotoLog = () => {
               <p>{recordCount} record{recordCount === 1 ? '' : 's'} found for this employee</p>
             </div>
             <div className="photo-log-toolbar-actions">
+              <label>
+                <span>Month / year</span>
+                <input
+                  type="month"
+                  value={monthFilter}
+                  onChange={(event) => {
+                    setMonthFilter(event.target.value);
+                    setPage(1);
+                  }}
+                />
+              </label>
               <label>
                 <span>Direction</span>
                 <select

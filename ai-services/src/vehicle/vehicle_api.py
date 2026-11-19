@@ -8,6 +8,8 @@ Exposes:
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -23,6 +25,8 @@ _SRC_DIR = _CURRENT_DIR.parent
 if str(_SRC_DIR) not in sys.path:
     sys.path.append(str(_SRC_DIR))
 
+from camera.camera_config import get_available_camera_configs, sanitize_rtsp_url
+from camera.camera_worker import CameraWorker
 from vehicle.service.vehicle_image_service import VehicleImageRecognitionService
 from vehicle.service.vehicle_video_service import VehicleVideoAnalysisService
 from vehicle.vehicle_config import (
@@ -39,6 +43,7 @@ router = APIRouter(prefix="/api/v1/vehicle", tags=["Vehicle Recognition"])
 # Singleton service instances
 _service: Optional[VehicleImageRecognitionService] = None
 _video_service: Optional[VehicleVideoAnalysisService] = None
+logger = logging.getLogger(__name__)
 
 
 def get_service() -> VehicleImageRecognitionService:
@@ -192,19 +197,68 @@ app = FastAPI(
     version="1.0.0",
 )
 
+@app.get("/camera-diagnostics/{camera_id}")
+def camera_diagnostics(camera_id: str):
+    """Tests the configured RTSP stream and returns only measured, non-secret details."""
+    normalized_id = camera_id.strip().upper()
+    if normalized_id not in {"CAM-01", "CAM-02"}:
+        raise HTTPException(status_code=404, detail="Unknown camera ID.")
+
+    config = get_available_camera_configs().get(normalized_id)
+    if config is None:
+        return {
+            "success": False,
+            "camera_id": normalized_id,
+            "state": "NOT_CONFIGURED",
+            "decode_status": "NOT_TESTED",
+            "resolution": None,
+            "fps": None,
+            "codec": None,
+            "frames_decoded": 0,
+            "error": f"{normalized_id} is not configured in the AI service environment.",
+        }
+
+    try:
+        result = CameraWorker(config=config).test_connection()
+    except Exception as exc:
+        logger.exception("Camera diagnostic failed for %s", normalized_id)
+        return {
+            "success": False,
+            "camera_id": normalized_id,
+            "state": "ERROR",
+            "decode_status": "FAIL",
+            "resolution": None,
+            "fps": 0.0,
+            "codec": "UNKNOWN",
+            "frames_decoded": 0,
+            "error": f"Camera diagnostic failed: {type(exc).__name__}.",
+        }
+
+    result["camera_id"] = normalized_id
+    result["direction"] = "OUT" if normalized_id == "CAM-01" else "IN"
+    return result
+
 @app.get("/health")
 def root_health():
     """Consolidated root health endpoint for Node.js backend integration."""
     service = get_service()
 
     # Inspect dual-camera pipeline process and heartbeat
+    configured_cameras = get_available_camera_configs()
     camera_health = {
         "running": False,
         "pid": None,
         "status": "STOPPED",
         "mapping": {
-            "CAM-01": {"ip": "192.168.15.56", "role": "OUT", "nvr_channel": 2},
-            "CAM-02": {"ip": "192.168.15.57", "role": "IN", "nvr_channel": 1},
+            camera_id: {
+                "configured": camera_id in configured_cameras,
+                "role": "OUT" if camera_id == "CAM-01" else "IN",
+                "nvr_channel": int(os.environ.get(
+                    "NVR_CHANNEL_CAM01" if camera_id == "CAM-01" else "NVR_CHANNEL_CAM02",
+                    "2" if camera_id == "CAM-01" else "1",
+                )),
+            }
+            for camera_id in ("CAM-01", "CAM-02")
         },
         "cameras": {},
     }
@@ -219,8 +273,8 @@ def root_health():
                 try:
                     import psutil
                     is_alive = psutil.pid_exists(pid)
-                except Exception:
-                    pass
+                except (OSError, ValueError, TypeError) as exc:
+                    logger.warning("Could not read AI camera status file: %s", exc)
             
             # Heartbeat freshness check (within 15 seconds)
             updated_at = st.get("updated_at")
@@ -238,7 +292,40 @@ def root_health():
             camera_health["pid"] = pid if is_alive else None
             camera_health["status"] = "RUNNING" if (is_alive and fresh and st.get("status") == "RUNNING") else "STOPPED"
             camera_health["last_heartbeat"] = updated_at
-            camera_health["cameras"] = st.get("cameras", {})
+            camera_status_fields = (
+                "configured",
+                "event_type",
+                "connected",
+                "connection_state",
+                "resolution",
+                "codec",
+                "acquisition_fps",
+                "processing_fps",
+                "processing_latency_ms",
+                "frames_received",
+                "frames_processed",
+                "dropped_frames",
+                "reconnect_count",
+                "last_error",
+                "faces_detected",
+                "registered_identified",
+                "unknown_tracks",
+                "attendance_recorded",
+            )
+            raw_cameras = st.get("cameras", {})
+            camera_health["cameras"] = {
+                camera_id: {
+                    field: (
+                        sanitize_rtsp_url(str(status[field]))
+                        if field == "last_error"
+                        else status[field]
+                    )
+                    for field in camera_status_fields
+                    if field in status
+                }
+                for camera_id, status in raw_cameras.items()
+                if isinstance(status, dict)
+            } if isinstance(raw_cameras, dict) else {}
             camera_health["outbox"] = st.get("outbox", {})
         except Exception:
             pass

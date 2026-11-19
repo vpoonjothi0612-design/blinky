@@ -904,26 +904,38 @@ class NumberPlatePipeline:
                     aspect = crop.shape[1] / max(crop.shape[0], 1)
                     candidate_inputs.append((box, confidence, crop, 1.8 <= aspect <= 3.2))
             if not candidate_inputs:
-                plate_box, plate_det_conf = None, 0.0
-                fallback_crop = vehicle_crop[int(vh * 0.60):int(vh * 0.95), int(vw * 0.20):int(vw * 0.80)]
-                candidate_inputs = [(None, 0.0, fallback_crop, False)]
-            plate_box, plate_det_conf, plate_crop, _ = candidate_inputs[0]
+                plate_box, plate_det_conf, plate_crop = None, 0.0, None
+            else:
+                plate_box, plate_det_conf, plate_crop, _ = candidate_inputs[0]
         elif rectified_plate:
             plate_crop, plate_box = rectified_plate
             plate_det_conf = 1.0
             candidate_inputs = [(plate_box, plate_det_conf, plate_crop, False)]
         else:
             plate_box, plate_det_conf = self.detector.detect_plate(vehicle_crop)
-            vh, vw = vehicle_crop.shape[:2]
             if plate_box is not None:
                 px1, py1, px2, py2 = plate_box
                 plate_crop = vehicle_crop[py1:py2, px1:px2]
             else:
-                plate_crop = vehicle_crop[int(vh * 0.60):int(vh * 0.95), int(vw * 0.20):int(vw * 0.80)]
-            candidate_inputs = [(plate_box, plate_det_conf, plate_crop, False)]
+                plate_crop = None
+            candidate_inputs = (
+                [(plate_box, plate_det_conf, plate_crop, False)]
+                if plate_box is not None and plate_crop is not None and plate_crop.size
+                else []
+            )
         det_latency_ms = (time.perf_counter() - t0) * 1000.0
 
         plate_detected = any(candidate_box is not None for candidate_box, _, _, _ in candidate_inputs)
+        if not plate_detected:
+            return PlateDetectionResult(
+                detected=False,
+                plate_bbox=None,
+                plate_text=None,
+                confidence=None,
+                ocr_status="PLATE_NOT_DETECTED",
+                detection_latency_ms=det_latency_ms,
+                ocr_latency_ms=0.0,
+            )
 
         # 3. Check OCR Engine Availability & Run OCR
         t1 = time.perf_counter()
@@ -961,7 +973,7 @@ class NumberPlatePipeline:
         ocr_latency_ms = (time.perf_counter() - t1) * 1000.0
 
         return PlateDetectionResult(
-            detected=plate_detected or (normalized is not None),
+            detected=plate_detected,
             plate_bbox=plate_box,
             plate_text=normalized,
             confidence=ocr_conf,

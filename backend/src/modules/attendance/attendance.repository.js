@@ -43,13 +43,21 @@ export const findAllAttendances = async ({ offset = 0, limit = 50, source, emplo
   });
 };
 
-export const findAttendancesByEmployeeId = async (employeeId, { offset = 0, limit = 50, source, eventType } = {}) => {
+export const findAttendancesByEmployeeId = async (
+  employeeId,
+  { offset = 0, limit = 50, source, eventType, startDate, endDate } = {}
+) => {
   const where = { employeeId };
   if (source && (source === "AI_CAMERA" || source === "MANUAL")) {
     where.source = source;
   }
   if (eventType && (eventType === "IN" || eventType === "OUT")) {
     where.eventType = eventType;
+  }
+  if (startDate || endDate) {
+    where.timestamp = {};
+    if (startDate) where.timestamp[Op.gte] = startDate;
+    if (endDate) where.timestamp[Op.lt] = endDate;
   }
 
   return Attendance.findAndCountAll({

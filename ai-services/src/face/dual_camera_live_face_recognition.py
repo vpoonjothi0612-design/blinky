@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import signal
 import sys
@@ -102,6 +103,8 @@ except ImportError:
 
 from live_face_recognition import TemporalLivenessTracker, draw_hud, draw_multi_person_hud
 from attendance_outbox import AttendanceOutbox
+
+logger = logging.getLogger(__name__)
 
 try:
     from stream_server import start_stream_server
@@ -297,6 +300,7 @@ COOLDOWN_SECONDS = float(os.environ.get("ATTENDANCE_COOLDOWN_SEC", "120.0"))
 OBSERVATION_CONFIRMATION_FRAMES = int(os.environ.get("CONFIRMATION_FRAMES", "1"))
 DEFAULT_MIN_MATCH_MARGIN = float(os.environ.get("MIN_MATCH_MARGIN", "0.04"))
 AI_PROCESS_INTERVAL_SEC = max(0.02, float(os.environ.get("AI_PROCESS_INTERVAL_MS", "33")) / 1000.0)
+FACE_DEBUG_DUMP_INTERVAL_SEC = max(0.0, float(os.environ.get("FACE_DEBUG_DUMP_INTERVAL_SEC", "5.0")))
 
 
 def verify_backend_connectivity(api_url: str) -> bool:
@@ -423,11 +427,13 @@ class CameraInferenceWorker:
         self.last_unknown_sent: float = 0.0
         self._recent_unknown_embeddings: List[Dict[str, Any]] = []
         self.frame_count: int = 0
+        self._last_face_debug_dump_at: float = 0.0
         self.last_processed_frame_idx: int = -1
 
         # Per-camera statistics & telemetry
         self.stats: Dict[str, Any] = {
             "frames_processed": 0,
+            "dropped_frames": 0,
             "faces_detected": 0,
             "registered_identified": 0,
             "unknown_tracks": 0,
@@ -589,8 +595,8 @@ class CameraInferenceWorker:
             with self.arcface_lock:
                 raw_emb = self.arcface.get_feat(aligned).flatten()
             raw_norm = float(np.linalg.norm(raw_emb))
-            if raw_norm <= 0 or np.isnan(raw_norm):
-                return {"status": "UNKNOWN", "similarity": 0.0}
+            if raw_norm <= 0 or not np.isfinite(raw_norm):
+                return {"status": "RECOGNITION_ERROR", "similarity": 0.0, "error": "ArcFace returned an invalid embedding"}
             live_emb = (raw_emb / raw_norm).flatten()
             decision = match_probe_against_registry(
                 probe_emb=live_emb,
@@ -607,34 +613,38 @@ class CameraInferenceWorker:
             # Reuse the exact live ArcFace vector when persisting an unknown capture;
             # this avoids a second model load/extraction in the API process.
             decision["embedding"] = live_emb.tolist()
-            debug_dir = Path(_AI_SERVICES_DIR) / "data" / "debug"
-            debug_dir.mkdir(parents=True, exist_ok=True)
-            crop_path = Path(_AI_SERVICES_DIR) / "data" / "captures" / f"face_debug_{self.camera_id}.jpg"
-            cv2.imwrite(str(crop_path), aligned)
-            now_iso = datetime.now(timezone.utc).isoformat()
-            debug_payload = {
-                "camera_id": self.camera_id,
-                "track_id": track_id,
-                "timestamp": now_iso,
-                "face_size": [int(face_crop.shape[1]), int(face_crop.shape[0])],
-                "quality": "QUALITY_PASS",
-                "best_employee": decision.get("employee_id") or decision.get("top_candidate"),
-                "best_score": decision.get("similarity") or decision.get("top_similarity"),
-                "second_score": decision.get("second_similarity"),
-                "threshold": decision.get("threshold", self.recognition_threshold),
-                "margin": decision.get("margin"),
-                "decision": decision.get("status"),
-                "top3": decision.get("rankings", [])[:3],
-                "aligned_crop_path": str(crop_path),
-            }
-            debug_path = debug_dir / f"face_last_{self.camera_id}.json"
-            temporary = debug_path.with_suffix(".json.tmp")
-            temporary.write_text(json.dumps(debug_payload, default=float), encoding="utf-8")
-            temporary.replace(debug_path)
-            decision["aligned_crop_path"] = str(crop_path)
+            now_monotonic = time.monotonic()
+            if now_monotonic - self._last_face_debug_dump_at >= FACE_DEBUG_DUMP_INTERVAL_SEC:
+                debug_dir = Path(_AI_SERVICES_DIR) / "data" / "debug"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                crop_path = Path(_AI_SERVICES_DIR) / "data" / "captures" / f"face_debug_{self.camera_id}.jpg"
+                cv2.imwrite(str(crop_path), aligned)
+                now_iso = datetime.now(timezone.utc).isoformat()
+                debug_payload = {
+                    "camera_id": self.camera_id,
+                    "track_id": track_id,
+                    "timestamp": now_iso,
+                    "face_size": [int(face_crop.shape[1]), int(face_crop.shape[0])],
+                    "quality": "QUALITY_PASS",
+                    "best_employee": decision.get("employee_id") or decision.get("top_candidate"),
+                    "best_score": decision.get("similarity") or decision.get("top_similarity"),
+                    "second_score": decision.get("second_similarity"),
+                    "threshold": decision.get("threshold", self.recognition_threshold),
+                    "margin": decision.get("margin"),
+                    "decision": decision.get("status"),
+                    "top3": decision.get("rankings", [])[:3],
+                    "aligned_crop_path": str(crop_path),
+                }
+                debug_path = debug_dir / f"face_last_{self.camera_id}.json"
+                temporary = debug_path.with_suffix(".json.tmp")
+                temporary.write_text(json.dumps(debug_payload, default=float), encoding="utf-8")
+                temporary.replace(debug_path)
+                self._last_face_debug_dump_at = now_monotonic
+                decision["aligned_crop_path"] = str(crop_path)
             return decision
         except Exception as ex:
-            return {"status": "UNKNOWN", "similarity": 0.0, "error": str(ex)}
+            logger.error("[%s] Track %s face recognition failed: %s", self.camera_id, track_id, ex)
+            return {"status": "RECOGNITION_ERROR", "similarity": 0.0, "error": str(ex)}
 
     def _run_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -651,6 +661,8 @@ class CameraInferenceWorker:
                 time.sleep(0.005)
                 continue
 
+            if self.last_processed_frame_idx >= 0 and f_idx > self.last_processed_frame_idx + 1:
+                self.stats["dropped_frames"] += f_idx - self.last_processed_frame_idx - 1
             self.last_processed_frame_idx = f_idx
             self.frame_count += 1
             self.stats["frames_processed"] = self.frame_count
@@ -974,8 +986,8 @@ def run_dual_camera_recognition(
     print("=================================================================")
     print("CP PLUS DUAL-CAMERA PRODUCTION ATTENDANCE PIPELINE")
     print("=================================================================")
-    print("CAM-01 -> Dedicated Exit Camera  (Event: OUT) [192.168.15.56]")
-    print("CAM-02 -> Dedicated Entry Camera (Event: IN)  [192.168.15.57]")
+    print("CAM-01 -> Dedicated Exit Camera  (Event: OUT)")
+    print("CAM-02 -> Dedicated Entry Camera (Event: IN)")
     print(f"Backend API URL        : {BACKEND_API_URL}")
     print(f"Frontal Threshold      : {RECOGNITION_THRESHOLD:.2f}")
     print(f"Profile Threshold      : {PROFILE_RECOGNITION_THRESHOLD:.2f}")
@@ -1110,16 +1122,27 @@ def run_dual_camera_recognition(
             cam_states = {}
             for c_id in ("CAM-01", "CAM-02"):
                 w = manager.get_worker(c_id) if manager else None
+                capture_status = w.get_status() if w else {}
+                inference_status = inference_workers[c_id].get_stats() if c_id in inference_workers else {}
                 cam_states[c_id] = {
                     "configured": c_id in configs,
                     "event_type": CAMERA_EVENT_MAPPING.get(c_id, "OUT" if c_id == "CAM-01" else "IN"),
-                    "connected": w.is_running() if w else False,
-                    "ip": configs[c_id].ip if c_id in configs else ("192.168.15.56" if c_id == "CAM-01" else "192.168.15.57"),
-                    "fps": round(w.get_status().get("fps", 0.0), 1) if w else 0.0,
-                    "faces_detected": inference_workers[c_id].stats.get("faces_detected", 0) if c_id in inference_workers else 0,
-                    "registered_identified": inference_workers[c_id].stats.get("registered_identified", 0) if c_id in inference_workers else 0,
-                    "unknown_tracks": inference_workers[c_id].stats.get("unknown_tracks", 0) if c_id in inference_workers else 0,
-                    "attendance_recorded": inference_workers[c_id].stats.get("attendance_recorded", 0) if c_id in inference_workers else 0,
+                    "connected": bool(w and w.is_connected()),
+                    "connection_state": capture_status.get("state", "NOT_CONFIGURED" if c_id not in configs else "STOPPED"),
+                    "resolution": capture_status.get("resolution", "N/A"),
+                    "codec": capture_status.get("codec", "UNKNOWN"),
+                    "acquisition_fps": capture_status.get("fps", 0.0),
+                    "processing_fps": inference_status.get("fps", 0.0),
+                    "processing_latency_ms": inference_status.get("avg_latency_ms", 0.0),
+                    "frames_received": capture_status.get("fps_frame_count", 0),
+                    "frames_processed": inference_status.get("frames_processed", 0),
+                    "dropped_frames": inference_status.get("dropped_frames", 0),
+                    "reconnect_count": capture_status.get("reconnect_count", 0),
+                    "last_error": sanitize_rtsp_url(str(capture_status.get("last_error", ""))),
+                    "faces_detected": inference_status.get("faces_detected", 0),
+                    "registered_identified": inference_status.get("registered_identified", 0),
+                    "unknown_tracks": inference_status.get("unknown_tracks", 0),
+                    "attendance_recorded": inference_status.get("attendance_recorded", 0),
                 }
             payload = {
                 "pid": os.getpid(),

@@ -18,6 +18,28 @@ import './LiveAttendanceMonitoring.css';
 const CAM_IN_ID = 'CAM-02';
 const CAM_OUT_ID = 'CAM-01';
 
+const cameraStatusClass = (status) => {
+  if (status === 'LIVE') return 'live';
+  if (status === 'RECONNECTING') return 'reconnecting';
+  return 'offline';
+};
+
+const cameraDiagnosticsSummary = (camera) => {
+  if (!camera) return 'Diagnostics pending';
+  if (camera.last_error) return `Error: ${camera.last_error}`;
+  const details = [camera.resolution, camera.codec].filter(Boolean);
+  if (Number.isFinite(camera.acquisition_fps)) {
+    details.push(`${camera.acquisition_fps} capture FPS`);
+  }
+  if (Number.isFinite(camera.processing_latency_ms)) {
+    details.push(`${camera.processing_latency_ms} ms latency`);
+  }
+  if (Number.isFinite(camera.dropped_frames)) {
+    details.push(`${camera.dropped_frames} skipped frames`);
+  }
+  return details.join(' · ') || 'Diagnostics pending';
+};
+
 // Clean URL resolver with no hardcoded hosts or ports
 const resolveImageUrl = (path) => {
   if (!path) return '';
@@ -132,8 +154,8 @@ const LiveAttendanceMonitoring = () => {
   // Dual Camera Streams State
   const [streamKeyIn, setStreamKeyIn] = useState(Date.now());
   const [streamKeyOut, setStreamKeyOut] = useState(Date.now());
-  const [streamStatusIn, setStreamStatusIn] = useState('LIVE');
-  const [streamStatusOut, setStreamStatusOut] = useState('LIVE');
+  const [streamStatusIn, setStreamStatusIn] = useState('UNKNOWN');
+  const [streamStatusOut, setStreamStatusOut] = useState('UNKNOWN');
 
   // Multi-Class Gate Surveillance Events (Latest 5 per lane)
   const [inEvents, setInEvents] = useState([]);
@@ -160,8 +182,9 @@ const LiveAttendanceMonitoring = () => {
     unknownCount: 0,
     vehicleCount: 0,
     animalCount: 0,
-    activeCameras: 2,
-    currentFps: 18.0,
+    activeCameras: 0,
+    currentFps: null,
+    cameras: null,
   });
 
   // Current Wall Clock Time
@@ -280,10 +303,24 @@ const LiveAttendanceMonitoring = () => {
     try {
       const statsRes = await api.get('/attendance/live-stats');
       if (statsRes.data?.data) {
-        setLiveStats(statsRes.data.data);
+        const stats = statsRes.data.data;
+        const cameras = stats.cameras || {};
+        const statusFor = (cameraId) => {
+          const camera = cameras[cameraId];
+          if (!camera) return 'UNKNOWN';
+          if (camera.connected === true) return 'LIVE';
+          if (camera.configured === false) return 'NOT CONFIGURED';
+          if (camera.connection_state === 'RECONNECTING') return 'RECONNECTING';
+          if (camera.connection_state === 'UNKNOWN' || camera.configured == null) return 'UNKNOWN';
+          return 'OFFLINE';
+        };
+        setLiveStats(stats);
+        setStreamStatusIn(statusFor(CAM_IN_ID));
+        setStreamStatusOut(statusFor(CAM_OUT_ID));
       }
     } catch {
-      // Suppress background poll errors
+      setStreamStatusIn('UNKNOWN');
+      setStreamStatusOut('UNKNOWN');
     }
   }, []);
 
@@ -522,7 +559,9 @@ const LiveAttendanceMonitoring = () => {
           </div>
           <div className="lam-chip fps" title="Inference processing speed">
             <span className="chip-label">FPS</span>
-            <span className="chip-val">{Number(liveStats.currentFps || 18.0).toFixed(1)}</span>
+            <span className="chip-val">
+              {Number.isFinite(liveStats.currentFps) ? Number(liveStats.currentFps).toFixed(1) : '—'}
+            </span>
           </div>
         </div>
 
@@ -575,9 +614,14 @@ const LiveAttendanceMonitoring = () => {
           <div className="lam-cam-pane lam-pane-in">
             <div className="lam-pane-header">
               <div className="lam-pane-title">
-                <span className={`lam-live-dot ${streamStatusIn.toLowerCase()}`} />
+                <span className={`lam-live-dot ${cameraStatusClass(streamStatusIn)}`} />
                 <strong className="lam-pane-name">Cam IN (CAM-02 Entry Gate)</strong>
-                <span className="lam-pane-ip">192.168.15.57</span>
+                <span
+                  className="lam-pane-ip"
+                  title={liveStats.cameras?.[CAM_IN_ID]?.last_error || 'No camera error reported'}
+                >
+                  {cameraDiagnosticsSummary(liveStats.cameras?.[CAM_IN_ID])}
+                </span>
               </div>
 
               <div className="lam-pane-tags">
@@ -592,8 +636,6 @@ const LiveAttendanceMonitoring = () => {
                 src={streamUrlIn}
                 alt="Cam IN Live Stream"
                 className="lam-stream-img"
-                onLoad={() => setStreamStatusIn('LIVE')}
-                onError={() => setStreamStatusIn('OFFLINE')}
               />
 
               {/* In-Video HUD Overlay for IN Camera */}
@@ -601,10 +643,14 @@ const LiveAttendanceMonitoring = () => {
                 <div className="lam-hud-top-row">
                   <div className="lam-hud-rec in">
                     <span className="rec-pulse-circle in" />
-                    <span>LIVE • CAM IN</span>
+                    <span>{streamStatusIn} • CAM IN</span>
                   </div>
                   <div className="lam-hud-fps">
-                    <span>{Number(liveStats.currentFps || 18.0).toFixed(1)} FPS</span>
+                    <span>
+                      {Number.isFinite(liveStats.cameras?.[CAM_IN_ID]?.processing_fps)
+                        ? `${Number(liveStats.cameras[CAM_IN_ID].processing_fps).toFixed(1)} FPS`
+                        : '— FPS'}
+                    </span>
                   </div>
                 </div>
 
@@ -679,6 +725,7 @@ const LiveAttendanceMonitoring = () => {
                             ? `${(latestPersonIn.match_score * 100).toFixed(1)}% Match`
                             : (isRegistered ? 'Verified Face' : 'Gate Crossing')}
                         </div>
+                        <div className="lam-marked-muted">{resolveLiveViewStatus(latestPersonIn) || 'Face orientation unavailable'}</div>
                       </div>
                     </div>
                   );
@@ -711,9 +758,14 @@ const LiveAttendanceMonitoring = () => {
           <div className="lam-cam-pane lam-pane-out">
             <div className="lam-pane-header">
               <div className="lam-pane-title">
-                <span className={`lam-live-dot ${streamStatusOut.toLowerCase()}`} />
+                <span className={`lam-live-dot ${cameraStatusClass(streamStatusOut)}`} />
                 <strong className="lam-pane-name">Cam OUT (CAM-01 Exit Gate)</strong>
-                <span className="lam-pane-ip">192.168.15.56</span>
+                <span
+                  className="lam-pane-ip"
+                  title={liveStats.cameras?.[CAM_OUT_ID]?.last_error || 'No camera error reported'}
+                >
+                  {cameraDiagnosticsSummary(liveStats.cameras?.[CAM_OUT_ID])}
+                </span>
               </div>
 
               <div className="lam-pane-tags">
@@ -728,8 +780,6 @@ const LiveAttendanceMonitoring = () => {
                 src={streamUrlOut}
                 alt="Cam OUT Live Stream"
                 className="lam-stream-img"
-                onLoad={() => setStreamStatusOut('LIVE')}
-                onError={() => setStreamStatusOut('OFFLINE')}
               />
 
               {/* In-Video HUD Overlay for OUT Camera */}
@@ -737,10 +787,14 @@ const LiveAttendanceMonitoring = () => {
                 <div className="lam-hud-top-row">
                   <div className="lam-hud-rec out">
                     <span className="rec-pulse-circle out" />
-                    <span>LIVE • CAM OUT</span>
+                    <span>{streamStatusOut} • CAM OUT</span>
                   </div>
                   <div className="lam-hud-fps">
-                    <span>{Number(liveStats.currentFps || 18.0).toFixed(1)} FPS</span>
+                    <span>
+                      {Number.isFinite(liveStats.cameras?.[CAM_OUT_ID]?.processing_fps)
+                        ? `${Number(liveStats.cameras[CAM_OUT_ID].processing_fps).toFixed(1)} FPS`
+                        : '— FPS'}
+                    </span>
                   </div>
                 </div>
 
@@ -815,6 +869,7 @@ const LiveAttendanceMonitoring = () => {
                             ? `${(latestPersonOut.match_score * 100).toFixed(1)}% Match`
                             : (isRegistered ? 'Verified Face' : 'Gate Crossing')}
                         </div>
+                        <div className="lam-marked-muted">{resolveLiveViewStatus(latestPersonOut) || 'Face orientation unavailable'}</div>
                       </div>
                     </div>
                   );

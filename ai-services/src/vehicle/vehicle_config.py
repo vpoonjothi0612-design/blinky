@@ -114,7 +114,8 @@ def sanitize_rtsp_url(url: str | int) -> str:
     """Masks user credentials in RTSP URLs to prevent sensitive credential exposure in logs.
 
     Example:
-        'rtsp://admin:pass123@192.168.1.50:554/stream' -> 'rtsp://***:***@192.168.1.50:554/stream'
+        'rtsp://camera-user:example-password@camera.example:554/stream'
+        -> 'rtsp://***:***@camera.example:554/stream'
 
     Args:
         url: RTSP URL string or camera index.

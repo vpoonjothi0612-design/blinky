@@ -7,10 +7,27 @@ import {
   getCameraStreamStatus,
   startCameraStream,
   testCameraStreamConnection,
+  testRtspCamera,
   getCameraStreamEvents,
 } from './camera.service';
 import Loader from '../../components/common/Loader';
 import Modal from '../../components/common/Modal';
+
+const cameraReachabilityLabel = (camera, reachable) => {
+  if (camera.status === 'INACTIVE') return 'INACTIVE';
+  if (!camera.ipAddress) return 'NOT CONFIGURED';
+  return reachable ? 'NETWORK REACHABLE' : 'NETWORK UNREACHABLE';
+};
+
+const isCameraReachable = (camera, streamStatus) => {
+  const ipAddress = String(camera?.ipAddress || '').trim();
+  const eventStreamMatches = Boolean(
+    ipAddress &&
+    streamStatus?.connected &&
+    (streamStatus.cameraIp === ipAddress || streamStatus.configuredUrl?.includes(ipAddress))
+  );
+  return Boolean(camera?.isOnline ?? (camera?.connectionStatus === 'ONLINE' || eventStreamMatches));
+};
 
 const CameraList = () => {
   const navigate = useNavigate();
@@ -26,6 +43,7 @@ const CameraList = () => {
   const [streamLoading, setStreamLoading] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [rtspTests, setRtspTests] = useState({});
   const [eventsModalOpen, setEventsModalOpen] = useState(false);
   const [recentEvents, setRecentEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
@@ -64,6 +82,32 @@ const CameraList = () => {
       });
     } finally {
       setTestingConnection(false);
+    }
+  };
+
+  const handleRtspTest = async (cameraId) => {
+    setRtspTests((previous) => ({
+      ...previous,
+      [cameraId]: { loading: true, result: null },
+    }));
+    try {
+      const response = await testRtspCamera(cameraId);
+      setRtspTests((previous) => ({
+        ...previous,
+        [cameraId]: { loading: false, result: response.data || response },
+      }));
+    } catch (err) {
+      setRtspTests((previous) => ({
+        ...previous,
+        [cameraId]: {
+          loading: false,
+          result: {
+            success: false,
+            state: err.response?.data?.data?.state || 'SERVICE_UNAVAILABLE',
+            error: err.response?.data?.message || err.message || 'RTSP test failed.',
+          },
+        },
+      }));
     }
   };
 
@@ -185,8 +229,8 @@ const CameraList = () => {
 
   // Determine stream status display
   const isConnected = streamStatus?.connected;
-  const isReconnecting = streamStatus?.status === 'RECONNECTING' || !isConnected;
-  const endpointUrl = streamStatus?.configuredUrl || 'rtsp://your-camera-url';
+  const isReconnecting = streamStatus?.status === 'RECONNECTING';
+  const endpointUrl = streamStatus?.configuredUrl || 'Not configured';
 
   return (
     <div className="camera-feeds-page fade-in">
@@ -262,7 +306,7 @@ const CameraList = () => {
           </div>
           <div className="cam-stream-info">
             <div className="cam-stream-title-row">
-              <span className="cam-stream-title">CP PLUS / Dahua Camera Stream</span>
+              <span className="cam-stream-title">Camera AlarmMaster Event API</span>
               <span
                 className={`cam-stream-status-pill ${
                   isConnected
@@ -273,7 +317,7 @@ const CameraList = () => {
                 }`}
               >
                 <span className="cam-status-dot" />
-                <span>{isConnected ? 'ONLINE' : 'RECONNECTING'}</span>
+                <span>{isConnected ? 'API ONLINE' : 'API OFFLINE'}</span>
               </span>
             </div>
             <div className="cam-stream-endpoint-row">
@@ -294,7 +338,7 @@ const CameraList = () => {
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
             </svg>
-            <span>{testingConnection ? 'Testing...' : 'Test Connection'}</span>
+            <span>{testingConnection ? 'Testing...' : 'Test Camera API'}</span>
           </button>
 
           <button
@@ -346,7 +390,7 @@ const CameraList = () => {
           }`}
         >
           <div>
-            <strong>{testResult.success ? '✓ Camera Reachable: ' : '✗ Camera Test Notice: '}</strong>
+            <strong>{testResult.success ? '✓ Camera API Reachable: ' : '✗ Camera API Test Notice: '}</strong>
             {testResult.success
               ? `HTTP ${testResult.statusCode} (${testResult.statusMessage || 'OK'}), Latency: ${testResult.latencyMs}ms, Server: ${testResult.server || 'Camera'}`
               : testResult.error || 'Could not reach camera at configured endpoint.'}
@@ -360,6 +404,67 @@ const CameraList = () => {
           </button>
         </div>
       )}
+
+      <section
+        aria-label="RTSP camera decode tests"
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '16px 20px',
+          marginBottom: '18px',
+          border: '1px solid #dbe3ec',
+          borderRadius: '12px',
+          background: '#fff',
+        }}
+      >
+        <div style={{ minWidth: '220px', flex: '1 1 260px' }}>
+          <strong>RTSP stream &amp; frame decode test</strong>
+          <div style={{ marginTop: '4px', color: '#64748b', fontSize: '13px' }}>
+            Uses camera credentials stored in the AI service&apos;s local environment.
+          </div>
+        </div>
+        {[
+          ['CAM-01', 'Exit · OUT'],
+          ['CAM-02', 'Entry · IN'],
+        ].map(([cameraId, label]) => {
+          const test = rtspTests[cameraId];
+          const result = test?.result;
+          return (
+            <div key={cameraId} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <button
+                type="button"
+                className="cam-action-btn-white"
+                onClick={() => handleRtspTest(cameraId)}
+                disabled={test?.loading}
+                aria-label={`Test RTSP stream for ${cameraId} ${label}`}
+              >
+                {test?.loading ? `Testing ${cameraId}…` : `Test ${cameraId} · ${label}`}
+              </button>
+              {result && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    maxWidth: '300px',
+                    color: result.success ? '#047857' : '#b91c1c',
+                    fontSize: '12px',
+                  }}
+                >
+                  <strong>{result.state || 'UNKNOWN'}</strong>
+                  {result.resolution && ` · ${result.resolution}`}
+                  {Number.isFinite(result.fps) && ` · ${result.fps} measured FPS`}
+                  {result.codec && ` · ${result.codec}`}
+                  {Number.isFinite(result.frames_decoded) && ` · ${result.frames_decoded} frames decoded`}
+                  {result.first_frame_ms != null && ` · first frame ${result.first_frame_ms} ms`}
+                  {result.error && <div>{result.error}</div>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </section>
 
       {/* ── 3. CAMERAS TABLE CARD ─────────────────────────────────────── */}
       <div className="cam-table-card">
@@ -518,15 +623,13 @@ const CameraList = () => {
                         </td>
                         <td>
                           {(() => {
-                            const isOnline = Boolean(
-                              row.isOnline ??
-                              (row.connectionStatus === 'ONLINE' ||
-                                (streamStatus?.connected && streamStatus?.cameraIp === row.ipAddress))
-                            );
+                            const isOnline = isCameraReachable(row, streamStatus);
                             return (
                               <span className={`cam-status-pill ${isOnline ? 'status-active' : 'status-inactive'}`}>
                                 <span className="cam-status-dot" />
-                                <span>{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
+                                <span title="Network reachability only; use the RTSP decode test to verify video.">
+                                  {cameraReachabilityLabel(row, isOnline)}
+                                </span>
                               </span>
                             );
                           })()}
@@ -600,11 +703,7 @@ const CameraList = () => {
                 </div>
               ) : (
                 sortedCameras.map((row) => {
-                  const isOnline = Boolean(
-                    row.isOnline ??
-                    (row.connectionStatus === 'ONLINE' ||
-                      (streamStatus?.connected && streamStatus?.cameraIp === row.ipAddress))
-                  );
+                  const isOnline = isCameraReachable(row, streamStatus);
                   return (
                     <div key={row.id} className="cam-m-card">
                       <div className="cam-m-card-header">
@@ -628,7 +727,9 @@ const CameraList = () => {
                         </div>
                         <span className={`cam-status-pill ${isOnline ? 'status-active' : 'status-inactive'}`}>
                           <span className="cam-status-dot" />
-                          <span>{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
+                          <span title="Network reachability only; use the RTSP decode test to verify video.">
+                            {cameraReachabilityLabel(row, isOnline)}
+                          </span>
                         </span>
                       </div>
 

@@ -160,7 +160,7 @@ const VehicleList = () => {
     return detections.filter((d) => {
       const isEntry = d.direction === 'IN' || d.camera_id?.includes('02') || d.event_type === 'VEHICLE_IN';
       const isExit = d.direction === 'OUT' || d.camera_id?.includes('01') || d.event_type === 'VEHICLE_OUT';
-      const hasPlate = Boolean(d.plate_text && d.plate_text.trim());
+      const hasPlate = Boolean(d.plate_text && d.plate_text.trim() && ['recognized', 'ok'].includes(String(d.plate_status || '').toLowerCase()));
 
       if (filterMovement === 'ENTRY' && !isEntry) return false;
       if (filterMovement === 'EXIT' && !isExit) return false;
@@ -193,7 +193,7 @@ const VehicleList = () => {
       if (isEntry) entries++;
       else exits++;
 
-      if (d.plate_text && d.plate_text.trim()) recognized++;
+      if (d.plate_text && d.plate_text.trim() && ['recognized', 'ok'].includes(String(d.plate_status || '').toLowerCase())) recognized++;
       else unrecognized++;
     });
 
@@ -373,9 +373,26 @@ const VehicleList = () => {
           <div className="veh-card-grid">
             {filteredDetections.map((d) => {
               const isEntry = d.direction === 'IN' || d.camera_id?.includes('02') || d.event_type === 'VEHICLE_IN';
-              const hasPlate = Boolean(d.plate_text && d.plate_text.trim());
+              const hasPlateText = Boolean(d.plate_text && d.plate_text.trim());
+              const plateStatus = String(d.plate_status || 'not_recognized').toLowerCase();
+              const isPlateRecognized = hasPlateText && ['recognized', 'ok'].includes(plateStatus);
+              const plateStatusLabel = {
+                pending_verification: 'PENDING VERIFICATION',
+                low_confidence: 'LOW CONFIDENCE',
+                invalid_format: 'FORMAT NEEDS REVIEW',
+              }[plateStatus] || (isPlateRecognized ? 'RECOGNIZED' : 'NOT RECOGNIZED');
+              const registeredVehicle = d.registered_vehicle;
+              const registryOwner = registeredVehicle?.owner?.name
+                || (registeredVehicle ? 'No owner assigned' : isPlateRecognized ? 'No active registry match' : 'Awaiting plate match');
+              const registeredDetails = registeredVehicle
+                ? [registeredVehicle.make, registeredVehicle.model, registeredVehicle.color].filter(Boolean).join(' · ')
+                : '';
               const isNew = newlyArrivedIds.has(d.id);
-              const snapshotUrl = d.image_frame_url ? resolveImageUrl(d.image_frame_url) : '';
+              const snapshotUrl = d.vehicle_image_url
+                ? resolveImageUrl(d.vehicle_image_url)
+                : d.image_frame_url
+                  ? resolveImageUrl(d.image_frame_url)
+                  : '';
               const plateCropUrl = d.image_plate_url ? resolveImageUrl(d.image_plate_url) : '';
 
               return (
@@ -410,8 +427,8 @@ const VehicleList = () => {
                   {/* Number Plate Display Section */}
                   <div className="card-plate-section">
                     <div className="plate-box-wrap">
-                      {hasPlate ? (
-                        <div className="plate-recognized-display">
+                      {hasPlateText ? (
+                        <div className={`plate-recognized-display ${isPlateRecognized ? '' : 'unverified'}`}>
                           {plateCropUrl && (
                             <AuthenticatedMediaImage mediaKey={plateCropUrl} alt="License Plate Crop" className="plate-crop-thumb" />
                           )}
@@ -419,15 +436,17 @@ const VehicleList = () => {
                             <span className="plate-country-code">IND</span>
                             <span className="plate-registration-number">{d.plate_text}</span>
                           </div>
-                          <span className="plate-status-badge recognized">✓ RECOGNIZED</span>
+                          <span className={`plate-status-badge ${isPlateRecognized ? 'recognized' : plateStatus === 'pending_verification' ? 'pending' : 'unrecognized'}`}>
+                            {isPlateRecognized ? '✓ ' : ''}{plateStatusLabel}
+                          </span>
                         </div>
                       ) : (
                         <div className="plate-unrecognized-display">
                           <div className="plate-unrecognized-text">
                             <span className="warn-icon">⚠️</span>
-                            <strong>Number Plate Not Recognized</strong>
+                            <strong>{plateStatus === 'pending_verification' ? 'Plate verification pending' : 'Number Plate Not Recognized'}</strong>
                           </div>
-                          <span className="plate-status-badge unrecognized">UNRECOGNIZED</span>
+                          <span className={`plate-status-badge ${plateStatus === 'pending_verification' ? 'pending' : 'unrecognized'}`}>{plateStatusLabel}</span>
                         </div>
                       )}
                     </div>
@@ -437,7 +456,7 @@ const VehicleList = () => {
                   <div className="card-bottom-info">
                     <div className="info-item">
                       <span className="info-label">VEHICLE TYPE</span>
-                      <span className="info-val strong">{d.name || d.department || 'Motorized Vehicle'}</span>
+                      <span className="info-val strong">{registeredVehicle?.type || d.vehicle_type || 'Motorized Vehicle'}</span>
                     </div>
 
                     <div className="info-item">
@@ -445,6 +464,12 @@ const VehicleList = () => {
                       <span className="info-val">
                         {isEntry ? 'Main Entry Gate (CAM-02)' : 'Main Exit Gate (CAM-01)'}
                       </span>
+                    </div>
+
+                    <div className="info-item">
+                      <span className="info-label">REGISTERED OWNER</span>
+                      <span className="info-val strong">{registryOwner}</span>
+                      {registeredDetails && <span className="info-val">{registeredDetails}</span>}
                     </div>
                   </div>
                 </article>
@@ -500,12 +525,17 @@ const VehicleList = () => {
                       </div>
                       {plateCorrectionError && <p className="plate-correction-error">{plateCorrectionError}</p>}
                     </div>
+                  ) : previewModal.plate_text && previewModal.plate_status === 'pending_verification' ? (
+                    <div className="modal-plate-view">
+                      <span className="plate-string">{previewModal.plate_text} (pending multi-frame verification)</span>
+                      {previewModal.image_plate_url && <AuthenticatedMediaImage mediaKey={resolveImageUrl(previewModal.image_plate_url)} alt="Plate Crop" className="modal-plate-crop" />}
+                    </div>
                   ) : previewModal.plate_text && previewModal.plate_status === 'low_confidence' ? (
                     <div className="modal-plate-view">
                       <span className="plate-string">{previewModal.plate_text} (low confidence - verify)</span>
                       {previewModal.image_plate_url && <AuthenticatedMediaImage mediaKey={resolveImageUrl(previewModal.image_plate_url)} alt="Plate Crop" className="modal-plate-crop" />}
                     </div>
-                  ) : previewModal.plate_text && (!previewModal.plate_status || ['recognized', 'ok'].includes(previewModal.plate_status)) ? (
+                  ) : previewModal.plate_text && ['recognized', 'ok'].includes(String(previewModal.plate_status || '').toLowerCase()) ? (
                     <div className="modal-plate-view">
                       {previewModal.image_plate_url && (
                         <div className="modal-crop-wrap">
@@ -1057,9 +1087,15 @@ const VehicleList = () => {
         }
 
         .plate-status-badge.recognized {
-          background: #dbeafe;
-          color: #1d4ed8;
-          border: 1px solid #bfdbfe;
+          background: #dcfce7;
+          color: #15803d;
+          border: 1px solid #bbf7d0;
+        }
+
+        .plate-status-badge.pending {
+          background: #e0e7ff;
+          color: #4338ca;
+          border: 1px solid #c7d2fe;
         }
 
         .plate-status-badge.unrecognized {

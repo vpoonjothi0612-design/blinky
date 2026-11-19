@@ -24,7 +24,10 @@ import { fileURLToPath } from "node:url";
 import config from "../config/env.js";
 import aiClient from "./aiClient.service.js";
 import { createAttendance } from "../modules/attendance/attendance.service.js";
-import { findCameraByName } from "../modules/camera/camera.repository.js";
+import {
+  findCameraByIp,
+  findCameraByName,
+} from "../modules/camera/camera.repository.js";
 import { captureUnknownFace } from "../modules/face-enrollment/face-enrollment.service.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -85,7 +88,7 @@ class CameraEventListenerService {
   getResolvedUrl(customUrl = null) {
     let raw = customUrl || config.cameraApiUrl;
     if (!raw) {
-      raw = `http://${config.cameraIp}/cpapi/AlarmMaster?action=attach&codes=%5bFaceDetection%5d`;
+      throw new Error("Camera AlarmMaster URL is not configured.");
     }
 
     // Strip trailing period or accidental spaces
@@ -98,9 +101,8 @@ class CameraEventListenerService {
 
     try {
       return new URL(raw);
-    } catch {
-      // Fallback fallback URL
-      return new URL(`http://${config.cameraIp}/cpapi/AlarmMaster?action=attach&codes=%5bFaceDetection%5d`);
+    } catch (error) {
+      throw new Error("Camera AlarmMaster URL is invalid.", { cause: error });
     }
   }
 
@@ -193,7 +195,7 @@ class CameraEventListenerService {
               "GET",
               `${targetUrl.pathname}${targetUrl.search}`,
               authChallenge,
-              config.cameraUsername || targetUrl.username || "admin",
+              config.cameraUsername || targetUrl.username || "",
               config.cameraPassword || targetUrl.password || ""
             );
             if (digestHeader) {
@@ -417,7 +419,7 @@ class CameraEventListenerService {
     let cameraId = null;
     let cam = null;
     try {
-      cam = await findCameraByName(`CP PLUS Camera (${cameraIp})`);
+      cam = await findCameraByIp(cameraIp) || await findCameraByName(`CP PLUS Camera (${cameraIp})`);
       if (cam) cameraId = cam.id;
     } catch (err) {
       console.warn(`[CameraListener] Could not resolve camera record: ${err.message}`);
@@ -426,6 +428,19 @@ class CameraEventListenerService {
     // 4. Process each face returned by AI service
     for (const face of recognitionResult.results) {
       if (face.status === "RECOGNIZED" && face.employeeId) {
+        const cameraLabel = `${cam?.name || ""} ${cam?.location || ""}`.toUpperCase();
+        const isExitCamera =
+          /CAM-?0?1/.test(cameraLabel) ||
+          Boolean(config.camera1Ip && cameraIp === config.camera1Ip);
+        const isEntryCamera =
+          /CAM-?0?2/.test(cameraLabel) ||
+          Boolean(config.camera2Ip && cameraIp === config.camera2Ip);
+        if (!isExitCamera && !isEntryCamera) {
+          eventRecord.status = "CAMERA_DIRECTION_UNRESOLVED";
+          eventRecord.note = "Camera is not mapped to CAM-01 (OUT) or CAM-02 (IN); attendance was not recorded.";
+          continue;
+        }
+
         // Enrolled employee recognized -> Record Attendance
         let capturedImage = null;
         try {
@@ -438,10 +453,7 @@ class CameraEventListenerService {
         }
 
         try {
-          const cameraName = cam ? cam.name : (cameraIp || "");
-          const eventType = /CAM-?01|192\.168\.15\.56|192\.168\.9\.207/i.test(cameraName)
-            ? "OUT"
-            : "IN";
+          const eventType = isExitCamera ? "OUT" : "IN";
           const attResult = await createAttendance({
             employeeId: face.employeeId,
             cameraId: cameraId,
@@ -639,13 +651,25 @@ class CameraEventListenerService {
    * Returns current listener status and metrics.
    */
   getStatus() {
-    const resolvedUrl = this.getResolvedUrl();
+    let resolvedUrl = null;
+    let configurationError = null;
+    try {
+      resolvedUrl = this.getResolvedUrl();
+    } catch (error) {
+      configurationError = error.message;
+    }
+
+    const configuredUrl = resolvedUrl
+      ? `${resolvedUrl.protocol}//${resolvedUrl.host}${resolvedUrl.pathname}${resolvedUrl.search}`
+      : null;
     return {
-      success: true,
+      success: Boolean(resolvedUrl),
+      configured: Boolean(resolvedUrl),
+      configurationError,
       status: this.status,
       connected: this.status === "CONNECTED",
-      cameraIp: resolvedUrl.hostname || config.cameraIp,
-      configuredUrl: resolvedUrl.toString(),
+      cameraIp: resolvedUrl?.hostname || null,
+      configuredUrl,
       connectedAt: this.connectedAt,
       lastEventAt: this.lastEventAt,
       lastError: this.lastError,

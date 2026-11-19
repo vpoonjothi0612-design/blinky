@@ -85,7 +85,7 @@ export const resolveEmployee = async (idOrCode) => {
   return emp;
 };
 
-// Helper: resolve camera by UUID, name ("CAM-01"), or IP ("192.168.9.207")
+// Resolve camera identity using the database record or logical camera ID.
 export const resolveCamera = async (idOrNameOrIp) => {
   if (!idOrNameOrIp) return null;
 
@@ -164,18 +164,28 @@ export const createAttendance = async (data) => {
   const camera = await resolveCamera(data.cameraId);
   const cameraId = camera ? camera.id : null;
   const cameraIdentifier = (camera ? camera.name : data.cameraId || "").toUpperCase();
+  const cameraAddress = String(camera?.ipAddress || data.cameraId || "").trim();
+  const camera1Address = String(process.env.CAMERA_1_IP || "").trim();
+  const camera2Address = String(process.env.CAMERA_2_IP || "").trim();
 
   const eventType = data.eventType === "OUT" ? "OUT" : "IN";
 
-  if (cameraIdentifier.includes("CAM-01") || cameraIdentifier === "CAM01" || cameraIdentifier.includes("192.168.15.56") || cameraIdentifier.includes("192.168.9.207")) {
+  const isExitCamera =
+    /CAM-?0?1/.test(cameraIdentifier) ||
+    (camera1Address && cameraAddress === camera1Address);
+  const isEntryCamera =
+    /CAM-?0?2/.test(cameraIdentifier) ||
+    (camera2Address && cameraAddress === camera2Address);
+
+  if (isExitCamera) {
     if (eventType !== "OUT") {
-      const error = new Error("Camera 'CAM-01' (192.168.15.56) is dedicated to exit (OUT events) and cannot generate IN events");
+      const error = new Error("Camera 'CAM-01' is dedicated to exit (OUT events) and cannot generate IN events");
       error.statusCode = 400;
       throw error;
     }
-  } else if (cameraIdentifier.includes("CAM-02") || cameraIdentifier === "CAM02" || cameraIdentifier.includes("192.168.15.57") || cameraIdentifier.includes("192.168.9.208")) {
+  } else if (isEntryCamera) {
     if (eventType !== "IN") {
-      const error = new Error("Camera 'CAM-02' (192.168.15.57) is dedicated to entry (IN events) and cannot generate OUT events");
+      const error = new Error("Camera 'CAM-02' is dedicated to entry (IN events) and cannot generate OUT events");
       error.statusCode = 400;
       throw error;
     }
@@ -667,13 +677,13 @@ export const getLiveStats = async () => {
   } catch {
     // ignore
   }
-
-  // Count active cameras
-  let activeCameras = 2;
-  try {
-    activeCameras = (await Camera.count({ where: { status: "ACTIVE" } })) || 2;
-  } catch {
-    // fallback
+  if (
+    !aiStatus ||
+    aiStatus.status !== "RUNNING" ||
+    !Number.isFinite(Date.parse(aiStatus.updated_at)) ||
+    Date.now() - Date.parse(aiStatus.updated_at) > 15_000
+  ) {
+    aiStatus = null;
   }
 
   // Unknown faces count
@@ -710,21 +720,70 @@ export const getLiveStats = async () => {
     // fallback
   }
 
-  const fpsCam01 = aiStatus?.cameras?.["CAM-01"]?.fps || 0;
-  const fpsCam02 = aiStatus?.cameras?.["CAM-02"]?.fps || 0;
-  const currentFps = Math.max(fpsCam01, fpsCam02) || 18.0;
+  const cameraStatuses = Object.entries(aiStatus?.cameras || {}).reduce((safeStatuses, [cameraId, camera]) => {
+    if (!camera || typeof camera !== "object") return safeStatuses;
+    const {
+      configured,
+      event_type,
+      connected,
+      connection_state,
+      resolution,
+      codec,
+      acquisition_fps,
+      processing_fps,
+      processing_latency_ms,
+      frames_received,
+      frames_processed,
+      dropped_frames,
+      reconnect_count,
+      last_error,
+      faces_detected,
+      registered_identified,
+      unknown_tracks,
+      attendance_recorded,
+    } = camera;
+    safeStatuses[cameraId] = {
+      configured,
+      event_type,
+      connected,
+      connection_state,
+      resolution,
+      codec,
+      acquisition_fps,
+      processing_fps,
+      processing_latency_ms,
+      frames_received,
+      frames_processed,
+      dropped_frames,
+      reconnect_count,
+      last_error: typeof last_error === "string"
+        ? last_error.replace(/(rtsps?:\/\/[^:/@\s]+):[^@\s]*@/gi, "$1:***@")
+        : last_error,
+      faces_detected,
+      registered_identified,
+      unknown_tracks,
+      attendance_recorded,
+    };
+    return safeStatuses;
+  }, {});
+  const measuredFps = Object.values(cameraStatuses)
+    .map((camera) => Number(camera?.processing_fps ?? camera?.fps))
+    .filter((fps) => Number.isFinite(fps));
+  const currentFps = measuredFps.length > 0 ? Math.max(...measuredFps) : null;
+  const activeCameras = Object.values(cameraStatuses)
+    .filter((camera) => camera?.connected === true).length;
 
   // Aggregate telemetry from AI cameras if available
-  const cam1Faces = aiStatus?.cameras?.["CAM-01"]?.faces_detected || 0;
-  const cam2Faces = aiStatus?.cameras?.["CAM-02"]?.faces_detected || 0;
+  const cam1Faces = cameraStatuses["CAM-01"]?.faces_detected || 0;
+  const cam2Faces = cameraStatuses["CAM-02"]?.faces_detected || 0;
   const aiFacesDetected = cam1Faces + cam2Faces;
 
-  const cam1Rec = aiStatus?.cameras?.["CAM-01"]?.registered_identified || 0;
-  const cam2Rec = aiStatus?.cameras?.["CAM-02"]?.registered_identified || 0;
+  const cam1Rec = cameraStatuses["CAM-01"]?.registered_identified || 0;
+  const cam2Rec = cameraStatuses["CAM-02"]?.registered_identified || 0;
   const aiEmployeesRecognized = cam1Rec + cam2Rec;
 
-  const cam1Unknown = aiStatus?.cameras?.["CAM-01"]?.unknown_tracks || 0;
-  const cam2Unknown = aiStatus?.cameras?.["CAM-02"]?.unknown_tracks || 0;
+  const cam1Unknown = cameraStatuses["CAM-01"]?.unknown_tracks || 0;
+  const cam2Unknown = cameraStatuses["CAM-02"]?.unknown_tracks || 0;
   const aiUnknownFaces = cam1Unknown + cam2Unknown;
 
   return {
@@ -737,12 +796,14 @@ export const getLiveStats = async () => {
     totalFacesDetected: aiFacesDetected > 0 ? aiFacesDetected : (totalToday + unknownCount),
     employeesRecognized: aiEmployeesRecognized > 0 ? aiEmployeesRecognized : totalToday,
     unknownCount: aiUnknownFaces > 0 ? aiUnknownFaces : unknownCount,
-    activeCameras: activeCameras || 2,
+    activeCameras,
     currentFps,
-    aiStatus: aiStatus?.status || "RUNNING",
-    cameras: aiStatus?.cameras || {
-      "CAM-01": { connected: true, fps: fpsCam01 || 18.0, event_type: "OUT", ip: "192.168.15.56" },
-      "CAM-02": { connected: true, fps: fpsCam02 || 18.0, event_type: "IN", ip: "192.168.15.57" },
+    aiStatus: aiStatus?.status || "UNKNOWN",
+    cameras: cameraStatuses["CAM-01"] || cameraStatuses["CAM-02"]
+      ? cameraStatuses
+      : {
+        "CAM-01": { configured: null, connected: false, connection_state: "UNKNOWN", event_type: "OUT" },
+        "CAM-02": { configured: null, connected: false, connection_state: "UNKNOWN", event_type: "IN" },
     },
   };
 };

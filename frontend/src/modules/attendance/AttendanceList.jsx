@@ -11,6 +11,16 @@ import useAuth from '../../hooks/useAuth';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+const isCameraNetworkReachable = (camera, streamStatus) => {
+  const ipAddress = String(camera?.ipAddress || '').trim();
+  const eventStreamMatches = Boolean(
+    ipAddress &&
+    streamStatus?.connected &&
+    (streamStatus.cameraIp === ipAddress || streamStatus.configuredUrl?.includes(ipAddress))
+  );
+  return Boolean(camera?.isOnline || eventStreamMatches);
+};
+
 // ── Custom Attendance Calendar Popover ────────────────────────────────
 const AttendanceCalendarPopover = ({ selectedDate, onSelectDate, onClose }) => {
   const popoverRef = useRef(null);
@@ -1243,30 +1253,28 @@ const AttendanceList = () => {
           </div>
         </div>
 
-        {/* Center: Dynamic Camera System Pill (Shows real live status, never dummy data) */}
+        {/* Camera network reachability is separate from RTSP frame-decode status. */}
         {(isAdmin || userRole === 'SECURITY') && (() => {
           const hasCameras = cameras.length > 0;
-          const anyConnected = cameras.some(
-            (c) => Boolean(c.isOnline || (streamStatus?.connected && streamStatus?.cameraIp === c.ipAddress))
-          );
+          const anyReachable = cameras.some((camera) => isCameraNetworkReachable(camera, streamStatus));
           const isReconnecting = streamStatus?.status === 'RECONNECTING' || streamStatus?.status === 'CONNECTING';
 
           return (
-            <div className={`att-camera-system-pill ${anyConnected ? 'sys-online' : 'sys-offline'}`}>
+            <div className={`att-camera-system-pill ${anyReachable ? 'sys-online' : 'sys-offline'}`}>
               <div className="camera-system-left">
-                {anyConnected ? (
-                  <span className="att-live-dot-pulse" title="Camera stream live & active" />
+                {anyReachable ? (
+                  <span className="att-live-dot-pulse" title="Camera network reachable; RTSP decode not verified here." />
                 ) : isReconnecting ? (
-                  <span className="att-dot-amber" title="Camera stream reconnecting..." />
+                  <span className="att-dot-amber" title="Camera event API reconnecting..." />
                 ) : (
-                  <span className="att-dot-offline" title="Cameras disconnected / offline" />
+                  <span className="att-dot-offline" title="Camera network is not reachable." />
                 )}
                 <span className="camera-system-title">
-                  {anyConnected
-                    ? 'Dual Camera System'
+                  {anyReachable
+                    ? 'Camera Network'
                     : isReconnecting
-                    ? 'Camera System (Reconnecting)'
-                    : 'Camera System (Offline)'}
+                    ? 'Camera Event API (Reconnecting)'
+                    : 'Camera Network (Unavailable)'}
                 </span>
               </div>
 
@@ -1277,23 +1285,20 @@ const AttendanceList = () => {
                 </div>
               ) : (
                 cameras.map((cam) => {
-                  const isOnline = Boolean(
-                    cam.isOnline ||
-                    (streamStatus?.connected && (streamStatus?.cameraIp === cam.ipAddress || streamStatus?.configuredUrl?.includes(cam.ipAddress)))
-                  );
+                  const isReachable = isCameraNetworkReachable(cam, streamStatus);
                   const isEntrance = (cam.location || '').toLowerCase().includes('in') || (cam.name || '').includes('02');
                   const roleLabel = isEntrance ? 'IN' : 'OUT';
 
                   return (
                     <div
                       key={cam.id || cam.name}
-                      className={isOnline ? (isEntrance ? 'camera-badge-in' : 'camera-badge-out') : 'camera-badge-offline'}
-                      title={`IP: ${cam.ipAddress || '—'} | Status: ${isOnline ? 'Online' : 'Offline / Disconnected'}`}
+                      className={isReachable ? (isEntrance ? 'camera-badge-in' : 'camera-badge-out') : 'camera-badge-offline'}
+                      title={`IP: ${cam.ipAddress || '—'} | Network: ${isReachable ? 'Reachable' : 'Unreachable'}. RTSP decode is tested separately.`}
                     >
-                      <span className={`camera-badge-dot ${isOnline ? (isEntrance ? 'dot-green' : 'dot-blue') : 'dot-red'}`} />
+                      <span className={`camera-badge-dot ${isReachable ? (isEntrance ? 'dot-green' : 'dot-blue') : 'dot-red'}`} />
                       <span>{cam.name} ({roleLabel})</span>
-                      <span className={isOnline ? 'badge-online-text' : 'badge-offline-text'}>
-                        {isOnline ? 'Online' : 'Offline'}
+                      <span className={isReachable ? 'badge-online-text' : 'badge-offline-text'}>
+                        {isReachable ? 'Reachable' : 'Unreachable'}
                       </span>
                     </div>
                   );
